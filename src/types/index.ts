@@ -9,6 +9,7 @@ export interface Player {
   projectedValue: number;
   projectedPoints: number;
   // Local values for readers (not synced to Firebase)
+  localRank?: number;
   localProjectedValue?: number;
   localProjectedPoints?: number;
 }

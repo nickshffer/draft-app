@@ -1,3 +1,4 @@
+import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -7,7 +8,7 @@ import { Player } from '../src/types'
 
 // Mock Firebase
 vi.mock('../src/hooks/useFirebaseDraft', () => ({
-  default: () => ({
+  useFirebaseDraft: () => ({
     teams: [],
     draftHistory: [],
     draftSettings: {
@@ -34,7 +35,9 @@ vi.mock('../src/hooks/useFirebaseDraft', () => ({
     isConnected: true,
     error: null,
     updateFirebaseState: vi.fn(),
-    createRoom: vi.fn()
+    createRoom: vi.fn(),
+    updateCustomPlayerList: vi.fn(),
+    customPlayerList: null
   })
 }))
 

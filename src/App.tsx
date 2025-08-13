@@ -62,9 +62,9 @@ const parseCsvToPlayers = (csvText: string): Player[] => {
       return index !== undefined && index < values.length ? values[index] : '';
     };
 
-    let position = getValue('position').toUpperCase();
-    if (['D', 'DST', 'D/ST'].includes(position)) position = 'DST';
-    if (['PK'].includes(position)) position = 'K';
+          let position = getValue('position').toUpperCase();
+      if (['D', 'DEF', 'D/ST'].includes(position)) position = 'DST';
+      if (['PK'].includes(position)) position = 'K';
 
     // Skip if position is invalid
     if (!Object.keys(positionCategories).includes(position)) {
@@ -99,8 +99,11 @@ export default function FantasyFootballDraft({
   const monofettFont = '"Monofett", cursive';
   const dmMonoFont = '"Geist Mono", monospace';
 
-  // Room management
-  const [roomId, setRoomId] = useState<string>('demo-room'); // In real app, get from URL or user input
+  // Room management - Get room ID from URL query parameter or use default
+  const [roomId, setRoomId] = useState<string>(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('roomid') || 'demo-room';
+  });
 
   // Firebase state (replaces most of the previous useState calls)
   const {
@@ -217,6 +220,19 @@ export default function FantasyFootballDraft({
     }
   }, [customPlayerList]);
 
+  // Listen for URL changes to update room ID
+  useEffect(() => {
+    const handlePopState = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const newRoomId = urlParams.get('roomid') || 'demo-room';
+      if (newRoomId !== roomId) {
+        setRoomId(newRoomId);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [roomId]);
 
 
   // Handle host CSV upload for global player list override
@@ -332,39 +348,59 @@ export default function FantasyFootballDraft({
             };
             
             let position = getValue('position').toUpperCase();
-            if (['D', 'DST', 'D/ST'].includes(position)) position = 'DEF';
+            if (['D', 'DEF', 'D/ST'].includes(position)) position = 'DST';
             if (['PK'].includes(position)) position = 'K';
             
             const csvPlayer = {
               name: getValue('name'),
               team: getValue('team').toUpperCase(),
               position: position,
+              rank: parseInt(getValue('rank')) || i,
               projectedValue: parseFloat(getValue('projectedValue')) || 0,
               projectedPoints: parseFloat(getValue('projectedPoints')) || 0
             };
 
             // Try to find exact match first
-            let matchedPlayer = players.find(p => 
-              p.name.toLowerCase() === csvPlayer.name.toLowerCase() &&
-              p.team.toLowerCase() === csvPlayer.team.toLowerCase() &&
-              p.position === csvPlayer.position
-            );
+            let matchedPlayer;
+            if (csvPlayer.position === 'DST') {
+              // For defense/special teams, only match on team and position (ignore name)
+              matchedPlayer = players.find(p => 
+                p.team.toLowerCase() === csvPlayer.team.toLowerCase() &&
+                p.position === csvPlayer.position
+              );
+            } else {
+              // For other positions, match on name, team, and position
+              matchedPlayer = players.find(p => 
+                p.name.toLowerCase() === csvPlayer.name.toLowerCase() &&
+                p.team.toLowerCase() === csvPlayer.team.toLowerCase() &&
+                p.position === csvPlayer.position
+              );
+            }
 
             // If no exact match, try fuzzy matching
             if (!matchedPlayer) {
-              const searchResults = playerFuse.search(`${csvPlayer.name} ${csvPlayer.team} ${csvPlayer.position}`);
-              
-              if (searchResults.length > 0 && searchResults[0].score! < 0.3) {
-                const suggestion = searchResults[0].item;
+              if (csvPlayer.position === 'DST') {
+                // For DST, if team didn't match exactly, report error without fuzzy matching
                 errors.push(
-                  `Row ${i + 1}: "${csvPlayer.name}" (${csvPlayer.team}, ${csvPlayer.position}) not found. Did you mean "${suggestion.name}" (${suggestion.team}, ${suggestion.position})?`
+                  `Row ${i + 1}: "${csvPlayer.name}" (${csvPlayer.team}, ${csvPlayer.position}) not found. No ${csvPlayer.team} defense found in host data.`
                 );
                 continue;
               } else {
-                errors.push(
-                  `Row ${i + 1}: "${csvPlayer.name}" (${csvPlayer.team}, ${csvPlayer.position}) not found in host data.`
-                );
-                continue;
+                // For other positions, use fuzzy matching
+                const searchResults = playerFuse.search(`${csvPlayer.name} ${csvPlayer.team} ${csvPlayer.position}`);
+                
+                if (searchResults.length > 0 && searchResults[0].score! < 0.3) {
+                  const suggestion = searchResults[0].item;
+                  errors.push(
+                    `Row ${i + 1}: "${csvPlayer.name}" (${csvPlayer.team}, ${csvPlayer.position}) not found. Did you mean "${suggestion.name}" (${suggestion.team}, ${suggestion.position})?`
+                  );
+                  continue;
+                } else {
+                  errors.push(
+                    `Row ${i + 1}: "${csvPlayer.name}" (${csvPlayer.team}, ${csvPlayer.position}) not found in host data.`
+                  );
+                  continue;
+                }
               }
             }
 
@@ -373,9 +409,11 @@ export default function FantasyFootballDraft({
             if (playerIndex !== -1) {
               updatedPlayers[playerIndex] = {
                 ...updatedPlayers[playerIndex],
+                localRank: csvPlayer.rank,
                 localProjectedValue: csvPlayer.projectedValue,
                 localProjectedPoints: csvPlayer.projectedPoints
               };
+
               matchedCount++;
             }
           }
@@ -635,6 +673,12 @@ export default function FantasyFootballDraft({
     setShowBidInterface(false);
   };
 
+  // Get player with local values merged in
+  const getPlayerWithLocalValues = (playerId: number): Player | null => {
+    const localPlayer = players.find(p => p.id === playerId);
+    return localPlayer || null;
+  };
+
   // Handle player selection for bidding
   const handlePlayerSelect = async (player: Player) => {
     if (!isHost) return;
@@ -730,7 +774,10 @@ export default function FantasyFootballDraft({
     .sort((a, b) => {
       let comparison = 0;
       if (sortBy === "rank") {
-        comparison = a.rank - b.rank;
+        // Use local rank if available, otherwise use global rank
+        const aRank = a.localRank !== undefined ? a.localRank : a.rank;
+        const bRank = b.localRank !== undefined ? b.localRank : b.rank;
+        comparison = aRank - bRank;
       } else if (sortBy === "name") {
         comparison = a.name.localeCompare(b.name);
       } else if (sortBy === "position") {
@@ -738,9 +785,15 @@ export default function FantasyFootballDraft({
       } else if (sortBy === "team") {
         comparison = a.team.localeCompare(b.team);
       } else if (sortBy === "projectedPoints") {
-        comparison = b.projectedPoints - a.projectedPoints;
+        // Use local projected points if available, otherwise use global
+        const aPoints = a.localProjectedPoints !== undefined ? a.localProjectedPoints : a.projectedPoints;
+        const bPoints = b.localProjectedPoints !== undefined ? b.localProjectedPoints : b.projectedPoints;
+        comparison = bPoints - aPoints; // Higher points first (descending)
       } else if (sortBy === "projectedValue") {
-        comparison = b.projectedValue - a.projectedValue;
+        // Use local projected value if available, otherwise use global
+        const aValue = a.localProjectedValue !== undefined ? a.localProjectedValue : a.projectedValue;
+        const bValue = b.localProjectedValue !== undefined ? b.localProjectedValue : b.projectedValue;
+        comparison = bValue - aValue; // Higher value first (descending)
       }
       return sortDirection === "asc" ? comparison : -comparison;
     });
@@ -896,6 +949,20 @@ export default function FantasyFootballDraft({
               {/* Draft Settings */}
               <div className="space-y-4">
                 <h3 className="text-lg font-medium border-b-2 border-black pb-2">Draft Settings</h3>
+                
+                {/* Room ID Display */}
+                <div className="bg-gray-50 border-2 border-black p-3">
+                  <label className="block text-sm font-medium text-black mb-1">
+                    Room ID
+                  </label>
+                  <div className="text-sm text-gray-700 font-mono bg-white border border-gray-300 px-2 py-1 rounded">
+                    {roomId}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Share this URL with others: {window.location.origin}{window.location.pathname}?roomid={roomId}
+                  </div>
+                </div>
+                
                 <div>
                   <label className="block text-sm font-medium text-black mb-1">
                     League Name
@@ -1455,6 +1522,10 @@ export default function FantasyFootballDraft({
                         <tr key={player.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-[#E8F9FB]'} hover:bg-[#FFE5F0] border-b border-black`}>
                           <td className="px-2 sm:px-3 py-1 sm:py-2 text-center text-xs text-black border-r border-black">
                             {player.rank}
+                            {player.localRank !== undefined && player.localRank !== player.rank && (
+                              <span className="text-gray-500"> ({player.localRank})</span>
+                            )}
+
                           </td>
                           <td className="px-2 sm:px-3 py-1 sm:py-2 text-center border-r border-black">
                             <PositionBadge pos={player.position} />
@@ -1555,6 +1626,9 @@ export default function FantasyFootballDraft({
                               <tr key={player.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-[#E8F9FB]'} border-b border-black last:border-b-0`}>
                                 <td className="px-3 sm:px-6 py-1 sm:py-2 whitespace-nowrap text-[11px] sm:text-xs text-black border-r border-black" style={equalColumnStyle}>
                                   {player.rank}
+                                  {player.localRank !== undefined && player.localRank !== player.rank && (
+                                    <span className="text-gray-500"> ({player.localRank})</span>
+                                  )}
                                 </td>
                                 <td className="px-3 sm:px-6 py-1 sm:py-2 whitespace-nowrap border-r border-black hidden sm:table-cell text-center" style={equalColumnStyle}>
                                   <PositionBadge pos={player.position} />
@@ -1823,45 +1897,52 @@ export default function FantasyFootballDraft({
                   <div className="text-sm text-black font-bold">Round {currentRound} • Pick {currentPick}</div>
                 </div>
                 
-                {selectedPlayer ? (
-                  /* With player selected - Mobile Optimized Auction Panel */
-                  <div className="border-2 border-black mb-3">
-                    {/* Player header */}
-                    <div className="bg-gray-100 p-2 border-b-2 border-black">
-                      <div className="font-extrabold text-base mt-1 text-[rgba(0,0,0,1)] text-center text-[20px] px-[0px] py-[9px] font-[Geist_Mono] p-[0px] px-[0px] py-[2px] px-[0px] py-[2px] pt-[2px] pr-[0px] pb-[5px] pl-[0px]">{selectedPlayer.name}</div>
-                      <div className="flex items-center justify-center space-x-2 mt-1">
-                        <PositionBadge pos={selectedPlayer.position} />
-                        <span className="text-xs font-medium text-black">{selectedPlayer.team}</span>
+                {selectedPlayer ? (() => {
+                  const playerWithLocalValues = getPlayerWithLocalValues(selectedPlayer.id) || selectedPlayer;
+                  return (
+                    /* With player selected - Mobile Optimized Auction Panel */
+                    <div className="border-2 border-black mb-3">
+                      {/* Player header */}
+                      <div className="bg-gray-100 p-2 border-b-2 border-black">
+                        <div className="font-extrabold text-base mt-1 text-[rgba(0,0,0,1)] text-center text-[20px] px-[0px] py-[9px] font-[Geist_Mono] p-[0px] px-[0px] py-[2px] px-[0px] py-[2px] pt-[2px] pr-[0px] pb-[5px] pl-[0px]">{playerWithLocalValues.name}</div>
+                        <div className="flex items-center justify-center space-x-2 mt-1">
+                          <PositionBadge pos={playerWithLocalValues.position} />
+                          <span className="text-xs font-medium text-black">{playerWithLocalValues.team}</span>
+                        </div>
+                        <div className="border-t border-black my-[9px] mx-[0px] mx-[0px] my-[5px]"></div>
+                        {/* Stats boxes */}
+                        <div className="flex items-center justify-center space-x-2 mt-[4px] mr-[0px] mb-[10px] ml-[0px]">
+                          <div className="flex flex-col items-center px-2 py-1 border-2 border-black bg-white min-w-[60px]" style={{boxShadow:'1px 1px 0 #000'}}>
+                            <span className="text-[9px] uppercase font-bold text-gray-600">Rank</span>
+                            <span className="text-sm font-bold text-black">
+                              #{playerWithLocalValues.rank}
+                              {playerWithLocalValues.localRank !== undefined && playerWithLocalValues.localRank !== playerWithLocalValues.rank && (
+                                <span className="text-gray-500 text-xs"> (#{playerWithLocalValues.localRank})</span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex flex-col items-center px-2 py-1 border-2 border-black bg-white min-w-[60px]" style={{boxShadow:'1px 1px 0 #000'}}>
+                            <span className="text-[9px] uppercase font-bold text-gray-600">Auc $</span>
+                            <span className="text-sm font-bold text-[#EF416E]">
+                              ${playerWithLocalValues.projectedValue}
+                              {playerWithLocalValues.localProjectedValue !== undefined && playerWithLocalValues.localProjectedValue !== playerWithLocalValues.projectedValue && (
+                                <span className="text-gray-500 text-xs"> (${playerWithLocalValues.localProjectedValue})</span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex flex-col items-center px-2 py-1 border-2 border-black bg-white min-w-[60px]" style={{boxShadow:'1px 1px 0 #000'}}>
+                            <span className="text-[9px] uppercase font-bold text-gray-600">Proj</span>
+                            <span className="text-sm font-bold text-[#04AEC5]">
+                              {playerWithLocalValues.projectedPoints.toFixed(1)}
+                              {playerWithLocalValues.localProjectedPoints !== undefined && playerWithLocalValues.localProjectedPoints !== playerWithLocalValues.projectedPoints && (
+                                <span className="text-gray-500 text-xs"> ({playerWithLocalValues.localProjectedPoints.toFixed(1)})</span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="border-t border-black my-[9px] mx-[0px] mx-[0px] my-[5px]"></div>
-                      {/* Stats boxes */}
-                      <div className="flex items-center justify-center space-x-2 mt-[4px] mr-[0px] mb-[10px] ml-[0px]">
-                        <div className="flex flex-col items-center px-2 py-1 border-2 border-black bg-white min-w-[60px]" style={{boxShadow:'1px 1px 0 #000'}}>
-                          <span className="text-[9px] uppercase font-bold text-gray-600">Rank</span>
-                          <span className="text-sm font-bold text-black">#{selectedPlayer.rank}</span>
-                        </div>
-                        <div className="flex flex-col items-center px-2 py-1 border-2 border-black bg-white min-w-[60px]" style={{boxShadow:'1px 1px 0 #000'}}>
-                          <span className="text-[9px] uppercase font-bold text-gray-600">Auc $</span>
-                          <span className="text-sm font-bold text-[#EF416E]">
-                            ${selectedPlayer.projectedValue}
-                            {selectedPlayer.localProjectedValue !== undefined && selectedPlayer.localProjectedValue !== selectedPlayer.projectedValue && (
-                              <span className="text-gray-500 text-xs"> (${selectedPlayer.localProjectedValue})</span>
-                            )}
-                          </span>
-                        </div>
-                        <div className="flex flex-col items-center px-2 py-1 border-2 border-black bg-white min-w-[60px]" style={{boxShadow:'1px 1px 0 #000'}}>
-                          <span className="text-[9px] uppercase font-bold text-gray-600">Proj</span>
-                          <span className="text-sm font-bold text-[#04AEC5]">
-                            {selectedPlayer.projectedPoints.toFixed(1)}
-                            {selectedPlayer.localProjectedPoints !== undefined && selectedPlayer.localProjectedPoints !== selectedPlayer.projectedPoints && (
-                              <span className="text-gray-500 text-xs"> ({selectedPlayer.localProjectedPoints.toFixed(1)})</span>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Current bid section */}
+                      
+                      {/* Current bid section */}
                     <div className="flex items-center border-b-2 border-black bg-black p-[8px] m-[0px]">
                       <div className="w-1/2 pr-2 flex flex-col items-center">
                         <div className="text-xs text-white font-bold uppercase text-center">Time</div>
@@ -1967,7 +2048,8 @@ export default function FantasyFootballDraft({
                       </div>
                     </div>
                   </div>
-                ) : (
+                  );
+                })() : (
                   /* No player selected yet */
                   <div className="text-center py-4 border-2 border-black mb-3">
                     <div className="text-sm text-black mb-1">Waiting for auction to start</div>
