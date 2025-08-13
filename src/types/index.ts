@@ -35,6 +35,10 @@ export interface DraftAction {
   teamId: number;
   amount: number;
   timestamp: Date;
+  round?: number;
+  pick?: number;
+  player?: Player;
+  team?: Team;
 }
 
 // Settings types

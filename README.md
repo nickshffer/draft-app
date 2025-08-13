@@ -1,122 +1,206 @@
 # Fantasy Football Draft App
 
-This React application was converted from a Figma-generated monolithic component into a properly structured React TypeScript application.
+A modern, real-time fantasy football draft application built with React, TypeScript, Vite, and Firebase.
+
+## 🔥 **NEW: Real-time Multi-User Support**
+
+This app now supports **real-time collaboration** where:
+- **Host** controls the draft (makes picks, manages settings, runs timer)
+- **Viewers** see all draft activity live but can upload their own player rankings
+- **Everyone** sees the same draft state, but with their personal player values
+
+## Features
+
+### 🎮 **Draft Modes**
+- **Auction Draft**: Full bidding system with timer and team selection
+- **Snake Draft**: Turn-based drafting with proper order calculation  
+- **Hybrid Mode**: Auction rounds followed by snake rounds
+
+### 🌐 **Real-time Collaboration**
+- **Firebase Integration**: All draft state synced across users
+- **Host Controls**: Only host can make picks and change settings
+- **Personal Rankings**: Each user can upload their own CSV player data
+- **Live Updates**: See draft picks, timer, and bids in real-time
+
+### 📊 **Data Management**
+- **CSV Import**: Upload your own player rankings and values
+- **Team Management**: Edit team names, owners, and draft positions
+- **Draft History**: Complete tracking of all picks and transactions
+
+### 🎨 **User Experience**
+- **Responsive Design**: Works perfectly on desktop and mobile
+- **Retro Gaming Theme**: Pixel-perfect styling with bold colors
+- **Connection Status**: See if you're HOST, VIEWER, or OFFLINE
+
+## Tech Stack
+
+- **React 18** - Modern React with hooks
+- **TypeScript** - Type safety and better developer experience
+- **Vite** - Fast build tool and development server
+- **Firebase** - Real-time database for multi-user sync
+- **Tailwind CSS** - Utility-first CSS framework
+- **Lucide React** - Beautiful icon library
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 16+ 
+- npm or yarn
+- Firebase project (for real-time features)
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd fantasy-football-draft-app
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. **Set up Firebase** (see Firebase Setup section below)
+
+4. Start the development server:
+```bash
+npm run dev
+```
+
+5. Open [http://localhost:5173](http://localhost:5173) in your browser
+
+## 🔥 Firebase Setup Guide
+
+### Step 1: Create Firebase Project
+
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Click "Create a project"
+3. Enter project name: `fantasy-draft-app`
+4. Disable Google Analytics (not needed)
+5. Click "Create project"
+
+### Step 2: Enable Realtime Database
+
+1. In your Firebase project, click "Realtime Database" in the left sidebar
+2. Click "Create Database"
+3. Choose location (us-central1 is fine)
+4. **Start in test mode** (we'll secure it later)
+5. Click "Done"
+
+### Step 3: Get Configuration
+
+1. Click the gear icon → "Project settings"
+2. Scroll down to "Your apps"
+3. Click the web icon `</>`
+4. Enter app nickname: `draft-app`
+5. **Don't check** "Set up Firebase Hosting"
+6. Click "Register app"
+7. **Copy the firebaseConfig object**
+
+### Step 4: Update Your Code
+
+Replace the config in `src/firebase/config.ts`:
+
+```typescript
+const firebaseConfig = {
+  apiKey: "your-actual-api-key",
+  authDomain: "your-project.firebaseapp.com",
+  databaseURL: "https://your-project-default-rtdb.firebaseio.com/",
+  projectId: "your-project-id",
+  storageBucket: "your-project.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "your-app-id"
+};
+```
+
+### Step 5: Set Database Rules
+
+1. Go to "Realtime Database" → "Rules" tab
+2. Replace the rules with:
+
+```json
+{
+  "rules": {
+    "draftRooms": {
+      "$roomId": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
+```
+
+3. Click "Publish"
+
+### Step 6: Test Real-time Features
+
+1. Start your dev server: `npm run dev`
+2. Open the app in two browser windows
+3. Make a draft pick in one window
+4. Watch it appear in the other window instantly! 🎉
+
+## Available Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run preview` - Preview production build locally
+- `npm run lint` - Run ESLint
 
 ## Project Structure
 
 ```
-draft-app/
-├── package.json                    # Dependencies and scripts
-├── index.html                      # HTML entry point
-├── vite.config.ts                  # Vite configuration
-├── tsconfig.json                   # TypeScript configuration
-├── tsconfig.node.json              # Node TypeScript configuration
-├── tailwind.config.js              # Tailwind CSS configuration
-├── postcss.config.js               # PostCSS configuration
-└── src/
-    ├── main.tsx                    # React entry point
-    ├── App.tsx                     # Main application component
-    ├── index.css                   # Global styles with Tailwind
-    ├── vite-env.d.ts              # Vite type definitions
-    ├── types/
-    │   └── index.ts               # TypeScript interfaces and types
-    ├── data/
-    │   └── mockData.ts            # Mock data and constants
-    ├── styles/
-    │   └── colors.ts              # Color themes and style constants
-    ├── hooks/
-    │   ├── useCsvUpload.ts        # CSV upload logic hook
-    │   └── useDraftLogic.ts       # Draft-related state and handlers hook
-    └── components/
-        ├── FontLoader.tsx         # Font preloading component
-        ├── PositionBadge.tsx      # Position badge component
-        ├── ImageWithFallback.tsx  # Image component with fallback
-        └── DigitalClock.tsx       # Retro digital clock component
+src/
+├── components/          # Reusable UI components
+├── data/               # Mock data and constants
+├── firebase/           # Firebase configuration
+├── hooks/              # Custom React hooks (including Firebase)
+├── styles/             # Color themes and styling
+├── types/              # TypeScript type definitions
+├── App.tsx             # Main application component
+└── main.tsx            # Application entry point
 ```
 
-## Key Changes Made
+## How It Works
 
-### 1. **Removed Figma-specific code**
-- Removed `defineProperties` from figma:react
-- Kept the motion import as `motion/react` (as per user's preference)
+### 🏠 **Host Mode**
+- Controls all draft actions (picks, bids, timer)
+- Can modify settings and team information
+- Manages the draft flow and progression
 
-### 2. **Added proper TypeScript types**
-- Created comprehensive interfaces in `src/types/index.ts`
-- Added proper typing throughout the application
+### 👀 **Viewer Mode**  
+- Sees all draft activity in real-time
+- Can upload personal player rankings via CSV
+- Cannot make draft picks or change settings
 
-### 3. **Separated concerns**
-- **Data**: Moved mock data and constants to `src/data/mockData.ts`
-- **Styles**: Moved color schemes to `src/styles/colors.ts`
-- **Components**: Split utility components into separate files
-- **Hooks**: Created custom hooks for complex logic
+### 📱 **Room System**
+- Each draft session has a unique room ID
+- Host creates the room, viewers join with room ID
+- All draft state synced via Firebase Realtime Database
 
-### 4. **Created proper React app structure**
-- Added standard React entry points (`main.tsx`, `index.html`)
-- Set up Vite, TypeScript, and Tailwind configurations
-- Added proper import/export structure
+## CSV Import Format
 
-## Components Created
+Upload a CSV file with the following columns:
 
-- **FontLoader**: Handles Google Fonts preloading
-- **PositionBadge**: Displays player position badges with colors
-- **ImageWithFallback**: Image component with error fallback
-- **DigitalClock**: Retro-style digital clock display
+```
+RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
+1,WR,Ja'Marr Chase,CIN,10,57,351.75
+2,RB,Bijan Robinson,ATL,5,56,317.44
+3,WR,Justin Jefferson,MIN,6,55,311.52
+```
 
-## Custom Hooks
+**Note**: Each user can upload their own rankings - this only affects what they see, not the shared draft state.
 
-- **useCsvUpload**: Handles CSV file upload and parsing logic
-- **useDraftLogic**: Manages draft state, timer, and draft actions
+## Contributing
 
-## Getting Started
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-1. **Install dependencies**:
-   ```bash
-   npm install
-   ```
+## License
 
-2. **Start development server**:
-   ```bash
-   npm run dev
-   ```
-
-3. **Build for production**:
-   ```bash
-   npm run build
-   ```
-
-## Next Steps
-
-The current implementation provides a solid foundation with proper structure. To complete the full fantasy football draft application, you would need to:
-
-1. **Implement remaining components** (as outlined in the original comments):
-   - Header.tsx
-   - SettingsModal.tsx
-   - TeamsSidebar.tsx
-   - DraftSidebar.tsx
-   - TabNavigation.tsx
-   - PlayersTab.tsx
-   - PositionsTab.tsx
-   - DraftBoardTab.tsx
-   - TeamRostersTab.tsx
-
-2. **Add the complete logic** from the original monolithic component to the appropriate hooks and components
-
-3. **Implement responsive design** and mobile optimizations
-
-4. **Add error boundaries** and loading states
-
-5. **Add tests** for components and hooks
-
-## Features
-
-The original application includes:
-- **Auction and Snake Draft modes**
-- **Player search and filtering**
-- **CSV import for player data**
-- **Real-time draft timer**
-- **Team management**
-- **Draft history tracking**
-- **Responsive design**
-- **Retro gaming aesthetic**
-
-This refactored structure makes the codebase more maintainable, testable, and follows React best practices.
+This project is licensed under the MIT License - see the LICENSE file for details.

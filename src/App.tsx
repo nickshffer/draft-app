@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Search, Settings, DollarSign, Users, Clock, ChevronDown, ChevronUp, X, Check, ChevronRight, Edit, Save, Upload, AlertCircle } from "lucide-react";
 
 // Import types
-import { FantasyFootballDraftProps, Team, Player, ActiveTab, SortBy, SortDirection, DraftSettings, DraftAction, CsvUploadStatus, DraftMode } from './types';
+import { FantasyFootballDraftProps, Team, Player, ActiveTab, SortBy, SortDirection, DraftSettings, CsvUploadStatus, DraftMode } from './types';
 
 // Import data and styles
 import { mockTeams, playerData, positionCategories } from './data/mockData';
@@ -11,6 +11,9 @@ import { customColors } from './styles/colors';
 // Import components
 import FontLoader from './components/FontLoader';
 import PositionBadge from './components/PositionBadge';
+
+// Import Firebase hook
+import { useFirebaseDraft } from './hooks/useFirebaseDraft';
 
 export default function FantasyFootballDraft({
   initialAuctionBudget = 200,
@@ -22,41 +25,21 @@ export default function FantasyFootballDraft({
   const monofettFont = '"Monofett", cursive';
   const dmMonoFont = '"Geist Mono", monospace';
 
-  // Draft settings
-  const [draftSettings, setDraftSettings] = useState<DraftSettings>({
-    auctionBudget: initialAuctionBudget,
-    rosterSize: initialRosterSize,
-    auctionRounds: initialAuctionRounds,
-    draftTimer: draftTimerSeconds,
-    teamCount: mockTeams.length
-  });
-  
-  // UI state
-  const [leagueName, setLeagueName] = useState("Yo Soy FIESTA");
-  const [showSettings, setShowSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("players");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [positionFilter, setPositionFilter] = useState("ALL");
-  const [sortBy, setSortBy] = useState<SortBy>("rank");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const [currentBid, setCurrentBid] = useState(1);
-  const [currentBidTeam, setCurrentBidTeam] = useState<number | null>(null);
-  const [showBidInterface, setShowBidInterface] = useState(false);
-  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
-  const [currentRound, setCurrentRound] = useState(1);
-  const [currentPick, setCurrentPick] = useState(1);
-  const [draftMode, setDraftMode] = useState<DraftMode>("auction");
-  const [snakeDraftOrder, setSnakeDraftOrder] = useState<number[]>([]);
-  const [timeRemaining, setTimeRemaining] = useState(draftSettings.draftTimer);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const [expandedTeams, setExpandedTeams] = useState<Record<number, boolean>>({});
-  const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
-  const [editFormData, setEditFormData] = useState({ owner: "", name: "" });
-  const [lastDraftAction, setLastDraftAction] = useState<DraftAction | null>(null);
-  const [showUndoButton, setShowUndoButton] = useState(false);
-  
-  // CSV upload state
+  // Room management
+  const [roomId, setRoomId] = useState<string>('demo-room'); // In real app, get from URL or user input
+  const [isHost, setIsHost] = useState<boolean>(true); // In real app, determine based on room creation
+
+  // Firebase state (replaces most of the previous useState calls)
+  const {
+    teams, draftHistory, draftSettings, leagueName, currentRound, currentPick,
+    draftMode, snakeDraftOrder, timeRemaining, isTimerRunning, selectedPlayer,
+    currentBid, currentBidTeam, lastDraftAction, showUndoButton,
+    highlightedTeamIndex, highlightDirection, currentDraftTeam, draftedPlayers,
+    isConnected, error, updateFirebaseState, createRoom
+  } = useFirebaseDraft(roomId, isHost);
+
+  // LOCAL STATE (stays the same - user-specific)
+  const [players, setPlayers] = useState<Player[]>(playerData); // ← This stays local
   const [csvUploadStatus, setCsvUploadStatus] = useState<CsvUploadStatus>({
     status: 'idle',
     message: ''
@@ -64,26 +47,22 @@ export default function FantasyFootballDraft({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   
+  // UI state (stays local)
+  const [showSettings, setShowSettings] = useState(false);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("players");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [positionFilter, setPositionFilter] = useState("ALL");
+  const [sortBy, setSortBy] = useState<SortBy>("rank");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [showBidInterface, setShowBidInterface] = useState(false);
+  const [expandedTeams, setExpandedTeams] = useState<Record<number, boolean>>({});
+  const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
+  const [editFormData, setEditFormData] = useState({ owner: "", name: "" });
+  
   // Responsive UI state
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
-  
-  // State for highlighted team in auction
-  const [highlightedTeamIndex, setHighlightedTeamIndex] = useState(0);
-  const [highlightDirection, setHighlightDirection] = useState(1);
-
-  // Draft data
-  const [teams, setTeams] = useState<Team[]>(mockTeams.map(team => ({
-    ...team,
-    budget: draftSettings.auctionBudget,
-    players: [],
-    draftPosition: team.id
-  })));
-  const [players, setPlayers] = useState<Player[]>(playerData);
-  const [draftedPlayers, setDraftedPlayers] = useState<number[]>([]);
-  const [draftHistory, setDraftHistory] = useState<any[]>([]);
-  const [currentDraftTeam, setCurrentDraftTeam] = useState<number | null>(null);
 
   // Check screen size for responsive adjustments
   useEffect(() => {
@@ -103,6 +82,46 @@ export default function FantasyFootballDraft({
     window.addEventListener('resize', checkScreenSize);
     return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
+
+  // Initialize Firebase room if host and no existing data
+  useEffect(() => {
+    if (isHost && teams.length === 0 && isConnected) {
+      const initialState = {
+        teams: mockTeams.map(team => ({
+          ...team,
+          budget: initialAuctionBudget,
+          players: [],
+          draftPosition: team.id
+        })),
+        draftHistory: [],
+        draftSettings: {
+          auctionBudget: initialAuctionBudget,
+          rosterSize: initialRosterSize,
+          auctionRounds: initialAuctionRounds,
+          draftTimer: draftTimerSeconds,
+          teamCount: mockTeams.length
+        },
+        leagueName: "Yo Soy FIESTA",
+        currentRound: 1,
+        currentPick: 1,
+        draftMode: "auction" as DraftMode,
+        snakeDraftOrder: [],
+        timeRemaining: draftTimerSeconds,
+        isTimerRunning: false,
+        selectedPlayer: null,
+        currentBid: 1,
+        currentBidTeam: null,
+        lastDraftAction: null,
+        showUndoButton: false,
+        highlightedTeamIndex: 0,
+        highlightDirection: 1,
+        currentDraftTeam: null,
+        draftedPlayers: []
+      };
+      
+      updateFirebaseState(initialState);
+    }
+  }, [isHost, teams.length, isConnected, initialAuctionBudget, initialRosterSize, initialAuctionRounds, draftTimerSeconds]); // updateFirebaseState is stable
 
   // CSV file handling
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -270,20 +289,22 @@ export default function FantasyFootballDraft({
   };
 
   // Save team's edited info
-  const handleSaveTeam = () => {
-    if (!editingTeamId) return;
+  const handleSaveTeam = async () => {
+    if (!editingTeamId || !isHost) return;
     
-    setTeams(prevTeams => {
-      return prevTeams.map(team => {
-        if (team.id === editingTeamId) {
-          return {
-            ...team,
-            owner: editFormData.owner,
-            name: editFormData.name
-          };
-        }
-        return team;
-      });
+    const updatedTeams = teams.map(team => {
+      if (team.id === editingTeamId) {
+        return {
+          ...team,
+          owner: editFormData.owner,
+          name: editFormData.name
+        };
+      }
+      return team;
+    });
+
+    await updateFirebaseState({
+      teams: updatedTeams
     });
     
     setEditingTeamId(null);
@@ -298,199 +319,163 @@ export default function FantasyFootballDraft({
     }));
   };
 
-  // Calculate current team on the clock
-  useEffect(() => {
-    if (draftMode === "auction") {
-      setCurrentDraftTeam(null);
-    } else {
-      if (snakeDraftOrder.length === 0) return;
-      const picksIntoSnake = (currentPick - 1) % teams.length;
-      const isEvenRound = (currentRound - draftSettings.auctionRounds) % 2 === 0;
-      let orderIndex = isEvenRound ? (snakeDraftOrder.length - 1 - picksIntoSnake) : picksIntoSnake;
-      orderIndex = ((orderIndex % snakeDraftOrder.length) + snakeDraftOrder.length) % snakeDraftOrder.length;
-      setCurrentDraftTeam(snakeDraftOrder[orderIndex]);
-    }
-  }, [currentRound, currentPick, draftMode, teams.length, draftSettings.auctionRounds, snakeDraftOrder]);
-
-  // Timer effect
-  useEffect(() => {
-    if (isTimerRunning) {
-      timerRef.current = setInterval(() => {
-        setTimeRemaining(prev => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current as NodeJS.Timeout);
-            setIsTimerRunning(false);
-            return draftSettings.draftTimer;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-    };
-  }, [isTimerRunning, draftSettings.draftTimer]);
-
-  // Switch from auction to snake draft when auction rounds are completed
-  useEffect(() => {
-    if (currentRound > draftSettings.auctionRounds) {
-      setDraftMode(prev => {
-        if (prev === "auction") {
-          const order = [...teams]
-            .sort((a,b)=> b.budget - a.budget)
-            .map(t=>t.id);
-          setSnakeDraftOrder(order);
-        }
-        return "snake";
-      });
-    } else {
-      setDraftMode("auction");
-    }
-  }, [currentRound, draftSettings.auctionRounds, teams]);
-
   // Auto-expand highlighted/current team accordion
   useEffect(() => {
     const teamToExpandId = draftMode === "auction" ? teams[highlightedTeamIndex]?.id : currentDraftTeam;
     if (teamToExpandId) {
-      setExpandedTeams(prev => ({ ...prev, [teamToExpandId]: true }));
+      setExpandedTeams(prev => {
+        // Only update if this team isn't already expanded
+        if (!prev[teamToExpandId]) {
+          return { ...prev, [teamToExpandId]: true };
+        }
+        return prev;
+      });
     }
-  }, [highlightedTeamIndex, currentDraftTeam, draftMode, teams]);
+  }, [highlightedTeamIndex, currentDraftTeam, draftMode, teams.length]); // Use teams.length instead of teams
 
-  // Auto-hide the undo button after 30 seconds
+  // Auto-hide the undo button after 30 seconds (host only)
   useEffect(() => {
     let undoTimer: NodeJS.Timeout | null = null;
     
-    if (showUndoButton) {
-      undoTimer = setTimeout(() => {
-        setShowUndoButton(false);
+    if (showUndoButton && isHost) {
+      undoTimer = setTimeout(async () => {
+        await updateFirebaseState({ showUndoButton: false });
       }, 30000);
     }
     
     return () => {
       if (undoTimer) clearTimeout(undoTimer);
     };
-  }, [showUndoButton]);
+  }, [showUndoButton, isHost]); // updateFirebaseState is stable, don't include it
 
   // Undo the last draft action
-  const handleUndoDraft = () => {
-    if (!lastDraftAction) return;
+  const handleUndoDraft = async () => {
+    if (!lastDraftAction || !isHost) return;
 
     const { playerId, teamId, amount } = lastDraftAction;
     
     const player = players.find(p => p.id === playerId);
     if (!player) return;
 
-    setTeams(prevTeams => {
-      return prevTeams.map(team => {
-        if (team.id === teamId) {
-          return {
-            ...team,
-            players: team.players.filter(p => p.id !== playerId),
-            budget: draftMode === "auction" ? team.budget + amount : team.budget
-          };
-        }
-        return team;
-      });
+    const updatedTeams = teams.map(team => {
+      if (team.id === teamId) {
+        return {
+          ...team,
+          players: team.players.filter(p => p.id !== playerId),
+          budget: draftMode === "auction" ? team.budget + amount : team.budget
+        };
+      }
+      return team;
     });
 
-    setDraftedPlayers(prev => prev.filter(id => id !== playerId));
-    setDraftHistory(prev => prev.slice(0, -1));
-    setLastDraftAction(null);
-    setShowUndoButton(false);
+    await updateFirebaseState({
+      teams: updatedTeams,
+      draftedPlayers: draftedPlayers.filter(id => id !== playerId),
+      draftHistory: draftHistory.slice(0, -1),
+      lastDraftAction: null,
+      showUndoButton: false,
+      currentRound: currentRound - (currentPick === 1 ? 1 : 0),
+      currentPick: currentPick === 1 ? teams.length : currentPick - 1
+    });
   };
 
-  // Update the highlighted team when auction is complete
-  const updateHighlightedTeam = () => {
-    if (draftMode === "auction") {
-      let nextIndex = highlightedTeamIndex + highlightDirection;
-      
-      if (nextIndex >= teams.length) {
-        setHighlightDirection(-1);
-        nextIndex = teams.length - 2;
-      } else if (nextIndex < 0) {
-        setHighlightDirection(1);
-        nextIndex = 1;
-      }
-      
-      setHighlightedTeamIndex(nextIndex);
-    }
+  // Timer controls (host only)
+  const startTimer = async () => {
+    if (!isHost) return;
+    await updateFirebaseState({ isTimerRunning: true });
   };
+
+  const pauseTimer = async () => {
+    if (!isHost) return;
+    await updateFirebaseState({ isTimerRunning: false });
+  };
+
+
 
   // Handle draft pick
-  const handleDraftPick = (playerId: number, teamId: number, amount = 0) => {
+  const handleDraftPick = async (playerId: number, teamId: number, amount = 0) => {
+    if (!isHost) return;
+    
     const player = players.find(p => p.id === playerId);
     if (!player) return;
 
-    setLastDraftAction({
+    const newLastAction = {
       playerId,
       teamId,
       amount,
       timestamp: new Date()
-    });
-    setShowUndoButton(true);
+    };
 
-    setTeams(prevTeams => {
-      return prevTeams.map(team => {
-        if (team.id === teamId) {
-          setExpandedTeams(prev => ({
-            ...prev,
-            [teamId]: true
-          }));
-          
-          return {
-            ...team,
-            players: [...team.players, player],
-            budget: draftMode === "auction" ? team.budget - amount : team.budget
-          };
-        }
-        return team;
-      });
+    const updatedTeams = teams.map(team => {
+      if (team.id === teamId) {
+        return {
+          ...team,
+          players: [...team.players, player],
+          budget: draftMode === "auction" ? team.budget - amount : team.budget
+        };
+      }
+      return team;
     });
 
-    setDraftedPlayers(prev => [...prev, playerId]);
-
-    setDraftHistory(prev => [
-      ...prev,
+    const newDraftHistory = [
+      ...draftHistory,
       {
+        playerId,
+        teamId,
+        amount: draftMode === "auction" ? amount : 0,
+        timestamp: new Date(),
         round: currentRound,
         pick: currentPick,
         player,
-        team: teams.find(t => t.id === teamId),
-        amount: draftMode === "auction" ? amount : 0,
-        timestamp: new Date()
+        team: teams.find(t => t.id === teamId)
       }
-    ]);
+    ];
 
-    if (currentPick % teams.length === 0) {
-      setCurrentRound(prev => prev + 1);
-    }
-    setCurrentPick(prev => prev + 1);
+    const newPick = currentPick + 1;
+    const newRound = newPick % teams.length === 1 ? currentRound + 1 : currentRound;
+
+    // Update expanded teams locally
+    setExpandedTeams(prev => ({
+      ...prev,
+      [teamId]: true
+    }));
+
+    // Update Firebase state
+    await updateFirebaseState({
+      teams: updatedTeams,
+      draftHistory: newDraftHistory,
+      draftedPlayers: [...draftedPlayers, playerId],
+      currentRound: newRound,
+      currentPick: newPick,
+      selectedPlayer: null,
+      currentBid: 1,
+      currentBidTeam: null,
+      timeRemaining: draftSettings.draftTimer,
+      isTimerRunning: false,
+      lastDraftAction: newLastAction,
+      showUndoButton: true,
+      highlightedTeamIndex: draftMode === "auction" ? 
+        (highlightedTeamIndex + highlightDirection >= teams.length ? 0 : 
+         highlightedTeamIndex + highlightDirection < 0 ? teams.length - 1 :
+         highlightedTeamIndex + highlightDirection) : highlightedTeamIndex
+    });
 
     setShowBidInterface(false);
-    setSelectedPlayer(null);
-    setCurrentBid(1);
-    setCurrentBidTeam(null);
-    setTimeRemaining(draftSettings.draftTimer);
-    setIsTimerRunning(false);
-    
-    if (draftMode === "auction") {
-      updateHighlightedTeam();
-    }
   };
 
   // Handle player selection for bidding
-  const handlePlayerSelect = (player: Player) => {
-    setSelectedPlayer(player);
+  const handlePlayerSelect = async (player: Player) => {
+    if (!isHost) return;
+    
+    await updateFirebaseState({
+      selectedPlayer: player,
+      currentBid: 1,
+      currentBidTeam: null,
+      timeRemaining: draftSettings.draftTimer,
+      isTimerRunning: true
+    });
+
     setShowBidInterface(true);
-    setCurrentBid(1);
-    setCurrentBidTeam(null);
-    setTimeRemaining(draftSettings.draftTimer);
-    setIsTimerRunning(true);
     
     if (isMobile) {
       setShowRightSidebar(true);
@@ -499,15 +484,17 @@ export default function FantasyFootballDraft({
   };
 
   // Handle bid submission
-  const handleBid = (teamId: number, bidAmount: number) => {
-    if (!selectedPlayer) return;
+  const handleBid = async (teamId: number, bidAmount: number) => {
+    if (!isHost || !selectedPlayer) return;
     
     const team = teams.find(t => t.id === teamId);
     if (!team || team.budget < bidAmount) return;
     
-    setCurrentBid(bidAmount);
-    setCurrentBidTeam(teamId);
-    setTimeRemaining(draftSettings.draftTimer);
+    await updateFirebaseState({
+      currentBid: bidAmount,
+      currentBidTeam: teamId,
+      timeRemaining: draftSettings.draftTimer
+    });
   };
 
   // Handle bid completion
@@ -524,30 +511,34 @@ export default function FantasyFootballDraft({
   };
 
   // Handle settings update
-  const handleSettingsUpdate = (newSettings: DraftSettings) => {
-    setDraftSettings(newSettings);
-    setTeams(prevTeams => {
-      let updated = prevTeams.map(team => ({
-        ...team,
-        budget: newSettings.auctionBudget
-      }));
-      if (newSettings.teamCount > updated.length) {
+  const handleSettingsUpdate = async (newSettings: DraftSettings) => {
+    if (!isHost) return;
+    
+    let updatedTeams = teams.map(team => ({
+      ...team,
+      budget: newSettings.auctionBudget
+    }));
 
-        for (let i = updated.length; i < newSettings.teamCount; i++) {
-          updated.push({
-            id: i + 1,
-            owner: `Owner ${i + 1}`,
-            name: `Team ${i + 1}`,
-            budget: newSettings.auctionBudget,
-            players: [],
-            draftPosition: i + 1
-          });
-        }
-      } else if (newSettings.teamCount < updated.length) {
-        updated = updated.slice(0, newSettings.teamCount);
+    if (newSettings.teamCount > updatedTeams.length) {
+      for (let i = updatedTeams.length; i < newSettings.teamCount; i++) {
+        updatedTeams.push({
+          id: i + 1,
+          owner: `Owner ${i + 1}`,
+          name: `Team ${i + 1}`,
+          budget: newSettings.auctionBudget,
+          players: [],
+          draftPosition: i + 1
+        });
       }
-      return updated;
+    } else if (newSettings.teamCount < updatedTeams.length) {
+      updatedTeams = updatedTeams.slice(0, newSettings.teamCount);
+    }
+
+    await updateFirebaseState({
+      draftSettings: newSettings,
+      teams: updatedTeams
     });
+    
     setShowSettings(false);
   };
 
@@ -592,11 +583,11 @@ export default function FantasyFootballDraft({
   const sortedTeamsByBudget = [...teams].sort((a, b) => b.budget - a.budget);
 
   // Group roster players by position - Used in Team Rosters tab
-  const getPlayersByPosition = (teamPlayers: Player[]) => {
+  const getPlayersByPosition = (teamPlayers: Player[] = []) => {
     const positionGroups: Record<string, Player[]> = {};
     
     Object.keys(positionCategories).forEach(pos => {
-      positionGroups[pos] = teamPlayers.filter(player => player.position === pos);
+      positionGroups[pos] = (teamPlayers || []).filter(player => player.position === pos);
     });
     
     return positionGroups;
@@ -605,7 +596,7 @@ export default function FantasyFootballDraft({
   // Find draft details for a player
   const getPlayerDraftDetails = (playerId: number, teamId: number) => {
     return draftHistory.find(
-      history => history.player.id === playerId && history.team.id === teamId
+      history => history.playerId === playerId && history.teamId === teamId
     );
   };
 
@@ -620,7 +611,7 @@ export default function FantasyFootballDraft({
   };
 
   // Suppress unused variable warnings by referencing them
-  void showBidInterface; void getPlayersByPosition;
+  void showBidInterface; void getPlayersByPosition; void setRoomId; void setIsHost; void snakeDraftOrder; void error; void createRoom;
 
   return (
     <div className="flex flex-col h-full bg-[#F0F2F5] text-gray-800 font-sans border border-black" style={{boxShadow:'8px 8px 0 #000'}}>
@@ -695,6 +686,13 @@ export default function FantasyFootballDraft({
             <div className="bg-black border-2 border-white px-2 py-1 flex items-center">
               <span className="font-mono text-sm text-[#8ED4D3]">{draftMode === "auction" ? "Auc" : "Snake"}</span>
             </div>
+
+            {/* Connection status */}
+            <div className={`border-2 border-white px-2 py-1 flex items-center ${isConnected ? 'bg-green-600' : 'bg-red-600'}`}>
+              <span className="font-mono text-sm text-white">
+                {isConnected ? (isHost ? "HOST" : "VIEW") : "OFFLINE"}
+              </span>
+            </div>
             
             {/* Settings button */}
             <button 
@@ -733,8 +731,9 @@ export default function FantasyFootballDraft({
                   <input 
                     type="text" 
                     value={leagueName}
-                    onChange={(e) => setLeagueName(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border-2 border-black text-black"
+                    onChange={(e) => isHost && updateFirebaseState({ leagueName: e.target.value })}
+                    disabled={!isHost}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
                 </div>
@@ -746,8 +745,9 @@ export default function FantasyFootballDraft({
                   <input 
                     type="number" 
                     value={draftSettings.auctionBudget}
-                    onChange={(e) => setDraftSettings({...draftSettings, auctionBudget: parseInt(e.target.value)})}
-                    className="w-full px-3 py-2 bg-white border-2 border-black text-black"
+                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, auctionBudget: parseInt(e.target.value)} })}
+                    disabled={!isHost}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
                     min="1"
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
@@ -760,8 +760,9 @@ export default function FantasyFootballDraft({
                   <input 
                     type="number" 
                     value={draftSettings.rosterSize}
-                    onChange={(e) => setDraftSettings({...draftSettings, rosterSize: parseInt(e.target.value)})}
-                    className="w-full px-3 py-2 bg-white border-2 border-black text-black"
+                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, rosterSize: parseInt(e.target.value)} })}
+                    disabled={!isHost}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
                     min="1"
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
@@ -774,8 +775,9 @@ export default function FantasyFootballDraft({
                   <input 
                     type="number" 
                     value={draftSettings.auctionRounds}
-                    onChange={(e) => setDraftSettings({...draftSettings, auctionRounds: parseInt(e.target.value)})}
-                    className="w-full px-3 py-2 bg-white border-2 border-black text-black"
+                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, auctionRounds: parseInt(e.target.value)} })}
+                    disabled={!isHost}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
                     min="0"
                     max={draftSettings.rosterSize}
                     style={{ boxShadow: '2px 2px 0 #000' }}
@@ -789,8 +791,9 @@ export default function FantasyFootballDraft({
                   <input
                     type="number"
                     value={draftSettings.teamCount}
-                    onChange={(e) => setDraftSettings({...draftSettings, teamCount: Math.max(2, parseInt(e.target.value))})}
-                    className="w-full px-3 py-2 bg-white border-2 border-black text-black"
+                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, teamCount: Math.max(2, parseInt(e.target.value))} })}
+                    disabled={!isHost}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
                     min="2"
                     max="20"
                     style={{ boxShadow: '2px 2px 0 #000' }}
@@ -804,8 +807,9 @@ export default function FantasyFootballDraft({
                   <input 
                     type="number" 
                     value={draftSettings.draftTimer}
-                    onChange={(e) => setDraftSettings({...draftSettings, draftTimer: parseInt(e.target.value)})}
-                    className="w-full px-3 py-2 bg-white border-2 border-black text-black"
+                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, draftTimer: parseInt(e.target.value)} })}
+                    disabled={!isHost}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
                     min="10"
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
@@ -940,24 +944,26 @@ export default function FantasyFootballDraft({
                             </div>
                             <div className="flex space-x-1">
                               <button 
-                                disabled={index === 0}
-                                onClick={() => {
+                                disabled={index === 0 || !isHost}
+                                onClick={async () => {
+                                  if (!isHost) return;
                                   const newTeams = [...teams];
                                   [newTeams[index], newTeams[index - 1]] = [newTeams[index - 1], newTeams[index]];
-                                  setTeams(newTeams);
+                                  await updateFirebaseState({ teams: newTeams });
                                 }}
-                                className="text-black hover:text-gray-700 disabled:opacity-30 border border-black px-1"
+                                className={`text-black hover:text-gray-700 disabled:opacity-30 border border-black px-1 ${!isHost ? 'cursor-not-allowed' : ''}`}
                               >
                                 <ChevronUp className="w-4 h-4" />
                               </button>
                               <button 
-                                disabled={index === teams.length - 1}
-                                onClick={() => {
+                                disabled={index === teams.length - 1 || !isHost}
+                                onClick={async () => {
+                                  if (!isHost) return;
                                   const newTeams = [...teams];
                                   [newTeams[index], newTeams[index + 1]] = [newTeams[index + 1], newTeams[index]];
-                                  setTeams(newTeams);
+                                  await updateFirebaseState({ teams: newTeams });
                                 }}
-                                className="text-black hover:text-gray-700 disabled:opacity-30 border border-black px-1"
+                                className={`text-black hover:text-gray-700 disabled:opacity-30 border border-black px-1 ${!isHost ? 'cursor-not-allowed' : ''}`}
                               >
                                 <ChevronDown className="w-4 h-4" />
                               </button>
@@ -1047,7 +1053,7 @@ export default function FantasyFootballDraft({
                   </div>
                   <div className="flex justify-between mt-1 text-sm">
                     <div className="text-black font-normal text-[11px] not-italic mt-[0px] mr-[0px] mb-[0px] ml-[33px]">{team.name}</div>
-                    <div className="text-black text-xs border border-black p-0.5 px-[7px] py-[2px] mx-[5px] my-[0px]">P: {team.players.length}</div>
+                    <div className="text-black text-xs border border-black p-0.5 px-[7px] py-[2px] mx-[5px] my-[0px]">P: {team.players?.length || 0}</div>
                   </div>
                   {draftMode === "snake" && (
                     <div className="text-xs text-black mt-1 border border-black p-0.5 inline-block">
@@ -1410,18 +1416,18 @@ export default function FantasyFootballDraft({
                             </td>
                             <td className="px-3 sm:px-6 py-2 sm:py-3 whitespace-nowrap border-r border-black">
                               <div className="font-medium text-[10px] sm:text-xs text-[rgba(0,0,0,0.5)] truncate max-w-[80px] sm:max-w-full">
-                                {pick.team.name}
+                                {pick.team?.name || 'Unknown Team'}
                               </div>
-                              <div className="text-base font-bold text-[#EF416E]" style={{fontFamily: dmMonoFont}}>{pick.team.owner}</div>
+                              <div className="text-base font-bold text-[#EF416E]" style={{fontFamily: dmMonoFont}}>{pick.team?.owner || 'Unknown Owner'}</div>
                             </td>
                             <td className="px-3 sm:px-6 py-2 sm:py-3 whitespace-nowrap font-medium text-xs sm:text-sm text-black border-r border-black">
-                              {pick.player.name}
+                              {pick.player?.name || 'Unknown Player'}
                               <div className="sm:hidden">
-                                <PositionBadge pos={pick.player.position} />
+                                <PositionBadge pos={pick.player?.position || 'QB'} />
                               </div>
                             </td>
                             <td className="px-3 sm:px-6 py-2 sm:py-3 whitespace-nowrap border-r border-black hidden sm:table-cell text-center" style={equalColumnStyle}>
-                              <PositionBadge pos={pick.player.position} />
+                              <PositionBadge pos={pick.player?.position || 'QB'} />
                             </td>
                             <td className="px-3 sm:px-6 py-2 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-[#EF416E] font-medium" style={equalColumnStyle}>
                               {pick.amount > 0 ? `$${pick.amount}` : '-'}
@@ -1630,21 +1636,24 @@ export default function FantasyFootballDraft({
                     <div className="p-2 bg-[rgba(243,244,246,1)]">
                       <div className="flex w-full justify-center items-stretch mb-3">
                         <button 
-                          onClick={() => setCurrentBid(Math.max(1, currentBid - 1))}
-                          className="h-10 w-10 bg-black text-white border-2 border-black flex items-center justify-center"
+                          onClick={() => isHost && updateFirebaseState({ currentBid: Math.max(1, currentBid - 1) })}
+                          disabled={!isHost}
+                          className={`h-10 w-10 bg-black text-white border-2 border-black flex items-center justify-center ${!isHost ? 'opacity-50' : ''}`}
                         >
                           -
                         </button>
                         <input 
                           type="number" 
                           value={currentBid}
-                          onChange={(e) => setCurrentBid(Math.max(1, parseInt(e.target.value) || 0))}
-                          className="h-10 flex-1 min-w-0 text-center bg-white border-y-2 border-black text-black text-lg font-bold focus:outline-none m-[0px] p-[0px] py-[0px] py-[0px] py-[0px] py-[0px]"
+                          onChange={(e) => isHost && updateFirebaseState({ currentBid: Math.max(1, parseInt(e.target.value) || 0) })}
+                          disabled={!isHost}
+                          className={`h-10 flex-1 min-w-0 text-center bg-white border-y-2 border-black text-black text-lg font-bold focus:outline-none ${!isHost ? 'opacity-50' : ''}`}
                           min="1"
                         />
                         <button 
-                          onClick={() => setCurrentBid(currentBid + 1)}
-                          className="h-10 w-10 bg-black text-white border-2 border-black flex items-center justify-center"
+                          onClick={() => isHost && updateFirebaseState({ currentBid: currentBid + 1 })}
+                          disabled={!isHost}
+                          className={`h-10 w-10 bg-black text-white border-2 border-black flex items-center justify-center ${!isHost ? 'opacity-50' : ''}`}
                         >
                           +
                         </button>
@@ -1674,12 +1683,16 @@ export default function FantasyFootballDraft({
                       
                       <div className="flex space-x-1">
                         <button
-                          onClick={() => {
+                          onClick={async () => {
+                            if (isHost) {
+                              await updateFirebaseState({
+                                selectedPlayer: null,
+                                currentBid: 1,
+                                currentBidTeam: null,
+                                isTimerRunning: false
+                              });
+                            }
                             setShowBidInterface(false);
-                            setSelectedPlayer(null);
-                            setCurrentBid(1);
-                            setCurrentBidTeam(null);
-                            setIsTimerRunning(false);
                           }}
                           className="flex-1 px-3 py-2 border-2 border-black text-black bg-white text-sm font-bold"
                           style={{ boxShadow: '2px 2px 0 #000' }}
@@ -1737,12 +1750,18 @@ export default function FantasyFootballDraft({
                 <div className="text-center">
                   <button
                     onClick={() => {
-                      setIsTimerRunning(!isTimerRunning);
+                      if (isTimerRunning) {
+                        pauseTimer();
+                      } else {
+                        startTimer();
+                      }
                     }}
-                    className="px-4 py-2 bg-black text-white border-2 border-black text-sm"
+                    disabled={!isHost}
+                    className={`px-4 py-2 bg-black text-white border-2 border-black text-sm ${!isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   >
                     {isTimerRunning ? "Pause Timer" : "Start Timer"}
+                    {!isHost && " (Host Only)"}
                   </button>
                 </div>
               </>
