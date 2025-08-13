@@ -6,7 +6,7 @@ import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.PROD ? '/draft-app' : ''}>
       <Routes>
         <Route path="/host" element={<App isHost={true} />} />
         <Route path="/" element={<App isHost={false} />} />
