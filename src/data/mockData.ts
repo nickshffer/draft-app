@@ -7,7 +7,7 @@ export const positionCategories: PositionCategories = {
   "WR": "Wide Receivers",
   "TE": "Tight Ends",
   "K": "Kickers",
-  "DEF": "Defense/Special Teams"
+  "DST": "Defense/Special Teams"
 };
 
 // League owners and team names

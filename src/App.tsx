@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Search, Settings, DollarSign, Users, Clock, ChevronDown, ChevronUp, X, Check, ChevronRight, Edit, Save, Upload, AlertCircle } from "lucide-react";
+import Fuse from 'fuse.js';
 
 // Import types
 import { FantasyFootballDraftProps, Team, Player, ActiveTab, SortBy, SortDirection, DraftSettings, CsvUploadStatus, DraftMode } from './types';
 
 // Import data and styles
-import { mockTeams, playerData, positionCategories } from './data/mockData';
+import { mockTeams, positionCategories } from './data/mockData';
 import { customColors } from './styles/colors';
+
+// Import sample CSV data
+import sampleCsvData from './data/sample.csv?raw';
 
 // Import components
 import FontLoader from './components/FontLoader';
@@ -14,12 +18,82 @@ import PositionBadge from './components/PositionBadge';
 
 // Import Firebase hook
 import { useFirebaseDraft } from './hooks/useFirebaseDraft';
+import { useCsvUpload } from './hooks/useCsvUpload';
+
+// Parse CSV data into Player objects
+const parseCsvToPlayers = (csvText: string): Player[] => {
+  const lines = csvText.split('\n').filter(line => line.trim());
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const headerMap: Record<string, string> = {
+    'rank': 'rank',
+    'position': 'position',
+    'pos': 'position',
+    'player': 'name',
+    'player name': 'name',
+    'team': 'team',
+    'bye': 'bye',
+    'bye week': 'bye',
+    'auc $': 'projectedValue',
+    'auction value': 'projectedValue', 
+    'auction $': 'projectedValue',
+    'proj. pts': 'projectedPoints',
+    'proj pts': 'projectedPoints',
+    'projected points': 'projectedPoints'
+  };
+
+  const columnIndices: Record<string, number> = {};
+  headers.forEach((header, index) => {
+    const normalizedHeader = header.toLowerCase().trim();
+    if (headerMap[normalizedHeader]) {
+      columnIndices[headerMap[normalizedHeader]] = index;
+    }
+  });
+
+  const players: Player[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    const values = line.split(',').map(v => v.trim());
+    const getValue = (key: string) => {
+      const index = columnIndices[key];
+      return index !== undefined && index < values.length ? values[index] : '';
+    };
+
+    let position = getValue('position').toUpperCase();
+    if (['D', 'DST', 'D/ST'].includes(position)) position = 'DST';
+    if (['PK'].includes(position)) position = 'K';
+
+    // Skip if position is invalid
+    if (!Object.keys(positionCategories).includes(position)) {
+      continue;
+    }
+
+    const player: Player = {
+      id: i,
+      rank: parseInt(getValue('rank')) || i,
+      position: position,
+      name: getValue('name'),
+      team: getValue('team'),
+      bye: parseInt(getValue('bye')) || 0,
+      projectedValue: parseFloat(getValue('projectedValue')) || 0,
+      projectedPoints: parseFloat(getValue('projectedPoints')) || 0
+    };
+
+    players.push(player);
+  }
+
+  return players;
+};
 
 export default function FantasyFootballDraft({
   initialAuctionBudget = 200,
   initialRosterSize = 16,
   initialAuctionRounds = 5,
-  draftTimerSeconds = 90
+  draftTimerSeconds = 90,
+  isHost = false
 }: FantasyFootballDraftProps) {
   // Font families (used directly in inline styles)
   const monofettFont = '"Monofett", cursive';
@@ -27,25 +101,35 @@ export default function FantasyFootballDraft({
 
   // Room management
   const [roomId, setRoomId] = useState<string>('demo-room'); // In real app, get from URL or user input
-  const [isHost, setIsHost] = useState<boolean>(true); // In real app, determine based on room creation
 
   // Firebase state (replaces most of the previous useState calls)
   const {
     teams, draftHistory, draftSettings, leagueName, currentRound, currentPick,
     draftMode, snakeDraftOrder, timeRemaining, isTimerRunning, selectedPlayer,
-    currentBid, currentBidTeam, lastDraftAction, showUndoButton,
+    currentBid, currentBidTeam,
     highlightedTeamIndex, highlightDirection, currentDraftTeam, draftedPlayers,
-    isConnected, error, updateFirebaseState, createRoom
+    customPlayerList, isConnected, error, updateFirebaseState, createRoom, updateCustomPlayerList
   } = useFirebaseDraft(roomId, isHost);
 
-  // LOCAL STATE (stays the same - user-specific)
-  const [players, setPlayers] = useState<Player[]>(playerData); // ← This stays local
+  // LOCAL STATE - Initialize with sample CSV data as fallback
+  const [players, setPlayers] = useState<Player[]>(() => {
+    // Use sample CSV data as initial fallback
+    return parseCsvToPlayers(sampleCsvData);
+  });
   const [csvUploadStatus, setCsvUploadStatus] = useState<CsvUploadStatus>({
     status: 'idle',
     message: ''
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+
+  // Host-only CSV upload for overriding global player list
+  const {
+    csvUploadStatus: hostCsvUploadStatus,
+    fileInputRef: hostFileInputRef,
+    isProcessingFile: isProcessingHostFile,
+    handleFileChange: handleHostFileChange
+  } = useCsvUpload();
   
   // UI state (stays local)
   const [showSettings, setShowSettings] = useState(false);
@@ -86,6 +170,9 @@ export default function FantasyFootballDraft({
   // Initialize Firebase room if host and no existing data
   useEffect(() => {
     if (isHost && teams.length === 0 && isConnected) {
+      // Parse sample CSV data for initial player list
+      const initialPlayers = parseCsvToPlayers(sampleCsvData);
+      
       const initialState = {
         teams: mockTeams.map(team => ({
           ...team,
@@ -112,16 +199,40 @@ export default function FantasyFootballDraft({
         currentBid: 1,
         currentBidTeam: null,
         lastDraftAction: null,
-        showUndoButton: false,
         highlightedTeamIndex: 0,
         highlightDirection: 1,
         currentDraftTeam: null,
-        draftedPlayers: []
+        draftedPlayers: [],
+        customPlayerList: initialPlayers // Initialize with sample CSV data
       };
       
       updateFirebaseState(initialState);
     }
   }, [isHost, teams.length, isConnected, initialAuctionBudget, initialRosterSize, initialAuctionRounds, draftTimerSeconds]); // updateFirebaseState is stable
+
+  // Update players when custom player list changes from Firebase
+  useEffect(() => {
+    if (customPlayerList && customPlayerList.length > 0) {
+      setPlayers(customPlayerList);
+    }
+  }, [customPlayerList]);
+
+
+
+  // Handle host CSV upload for global player list override
+  const handleHostCsvUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isHost) return;
+    
+    handleHostFileChange(event, (parsedPlayers: Player[]) => {
+      // Update local players immediately
+      setPlayers(parsedPlayers);
+      
+      // Save to Firebase for all participants
+      if (updateCustomPlayerList) {
+        updateCustomPlayerList(parsedPlayers);
+      }
+    });
+  };
 
   // CSV file handling
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,7 +309,16 @@ export default function FantasyFootballDraft({
             return;
           }
           
-          const parsedPlayers: Player[] = [];
+          // Set up fuzzy search for existing players
+          const playerFuse = new Fuse(players, {
+            keys: ['name', 'team', 'position'],
+            threshold: 0.3,
+            includeScore: true
+          });
+
+          const errors: string[] = [];
+          const updatedPlayers = [...players];
+          let matchedCount = 0;
           
           for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
@@ -212,44 +332,82 @@ export default function FantasyFootballDraft({
             };
             
             let position = getValue('position').toUpperCase();
-            
             if (['D', 'DST', 'D/ST'].includes(position)) position = 'DEF';
             if (['PK'].includes(position)) position = 'K';
             
-            if (!Object.keys(positionCategories).includes(position)) {
-              continue;
-            }
-            
-            const rank = parseInt(getValue('rank')) || i;
-            const bye = parseInt(getValue('bye')) || 0;
-            const projectedValue = parseFloat(getValue('projectedValue')) || 0;
-            const projectedPoints = parseFloat(getValue('projectedPoints')) || 0;
-            
-            const player: Player = {
-              id: i,
-              rank: rank,
-              position: position,
+            const csvPlayer = {
               name: getValue('name'),
-              team: getValue('team'),
-              bye: bye,
-              projectedValue: projectedValue,
-              projectedPoints: projectedPoints
+              team: getValue('team').toUpperCase(),
+              position: position,
+              projectedValue: parseFloat(getValue('projectedValue')) || 0,
+              projectedPoints: parseFloat(getValue('projectedPoints')) || 0
             };
-            
-            parsedPlayers.push(player);
+
+            // Try to find exact match first
+            let matchedPlayer = players.find(p => 
+              p.name.toLowerCase() === csvPlayer.name.toLowerCase() &&
+              p.team.toLowerCase() === csvPlayer.team.toLowerCase() &&
+              p.position === csvPlayer.position
+            );
+
+            // If no exact match, try fuzzy matching
+            if (!matchedPlayer) {
+              const searchResults = playerFuse.search(`${csvPlayer.name} ${csvPlayer.team} ${csvPlayer.position}`);
+              
+              if (searchResults.length > 0 && searchResults[0].score! < 0.3) {
+                const suggestion = searchResults[0].item;
+                errors.push(
+                  `Row ${i + 1}: "${csvPlayer.name}" (${csvPlayer.team}, ${csvPlayer.position}) not found. Did you mean "${suggestion.name}" (${suggestion.team}, ${suggestion.position})?`
+                );
+                continue;
+              } else {
+                errors.push(
+                  `Row ${i + 1}: "${csvPlayer.name}" (${csvPlayer.team}, ${csvPlayer.position}) not found in host data.`
+                );
+                continue;
+              }
+            }
+
+            // Update the matched player with local values
+            const playerIndex = updatedPlayers.findIndex(p => p.id === matchedPlayer!.id);
+            if (playerIndex !== -1) {
+              updatedPlayers[playerIndex] = {
+                ...updatedPlayers[playerIndex],
+                localProjectedValue: csvPlayer.projectedValue,
+                localProjectedPoints: csvPlayer.projectedPoints
+              };
+              matchedCount++;
+            }
           }
-          
-          if (parsedPlayers.length === 0) {
-            setCsvUploadStatus({ status: 'error', message: 'No valid player data found in CSV' });
+
+          // Report errors but continue with successful matches
+          let statusMessage = '';
+          if (matchedCount > 0) {
+            statusMessage = `Successfully matched ${matchedCount} players with your local values`;
+            if (errors.length > 0) {
+              statusMessage += `\n\nWarnings (${errors.length} records skipped):\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '\n...and more' : ''}`;
+            }
+          } else if (errors.length > 0) {
+            setCsvUploadStatus({ 
+              status: 'error', 
+              message: `No players matched. Errors found:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? '\n...and more' : ''}` 
+            });
+            setIsProcessingFile(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+          }
+
+          if (matchedCount === 0) {
+            setCsvUploadStatus({ status: 'error', message: 'No players matched the host data' });
             setIsProcessingFile(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
             return;
           }
           
-          setPlayers(parsedPlayers);
+          setPlayers(updatedPlayers);
           setCsvUploadStatus({ 
-            status: 'success', 
-            message: `Successfully imported ${parsedPlayers.length} players` 
+            status: errors.length > 0 ? 'success' : 'success', 
+            message: statusMessage
           });
           
         } catch (err) {
@@ -333,26 +491,14 @@ export default function FantasyFootballDraft({
     }
   }, [highlightedTeamIndex, currentDraftTeam, draftMode, teams.length]); // Use teams.length instead of teams
 
-  // Auto-hide the undo button after 30 seconds (host only)
-  useEffect(() => {
-    let undoTimer: NodeJS.Timeout | null = null;
-    
-    if (showUndoButton && isHost) {
-      undoTimer = setTimeout(async () => {
-        await updateFirebaseState({ showUndoButton: false });
-      }, 30000);
-    }
-    
-    return () => {
-      if (undoTimer) clearTimeout(undoTimer);
-    };
-  }, [showUndoButton, isHost]); // updateFirebaseState is stable, don't include it
+  // Undo button is always visible when there are picks to undo (no auto-hide)
 
   // Undo the last draft action
   const handleUndoDraft = async () => {
-    if (!lastDraftAction || !isHost) return;
+    if (draftHistory.length === 0 || !isHost) return;
 
-    const { playerId, teamId, amount } = lastDraftAction;
+    const lastPick = draftHistory[draftHistory.length - 1];
+    const { playerId, teamId, amount } = lastPick;
     
     const player = players.find(p => p.id === playerId);
     if (!player) return;
@@ -368,14 +514,41 @@ export default function FantasyFootballDraft({
       return team;
     });
 
+    const newDraftHistory = draftHistory.slice(0, -1);
+    const newLastAction = newDraftHistory.length > 0 ? newDraftHistory[newDraftHistory.length - 1] : null;
+
     await updateFirebaseState({
       teams: updatedTeams,
       draftedPlayers: draftedPlayers.filter(id => id !== playerId),
-      draftHistory: draftHistory.slice(0, -1),
+      draftHistory: newDraftHistory,
+      lastDraftAction: newLastAction,
+      currentRound: lastPick.round || currentRound,
+      currentPick: lastPick.pick || currentPick
+    });
+  };
+
+  // Reset all draft picks (host only)
+  const handleResetDraft = async () => {
+    if (!isHost) return;
+    
+    const resetTeams = teams.map(team => ({
+      ...team,
+      players: [],
+      budget: draftSettings.auctionBudget
+    }));
+
+    await updateFirebaseState({
+      teams: resetTeams,
+      draftHistory: [],
+      draftedPlayers: [],
       lastDraftAction: null,
-      showUndoButton: false,
-      currentRound: currentRound - (currentPick === 1 ? 1 : 0),
-      currentPick: currentPick === 1 ? teams.length : currentPick - 1
+      currentRound: 1,
+      currentPick: 1,
+      selectedPlayer: null,
+      currentBid: 1,
+      currentBidTeam: null,
+      isTimerRunning: false,
+      timeRemaining: draftSettings.draftTimer
     });
   };
 
@@ -453,7 +626,6 @@ export default function FantasyFootballDraft({
       timeRemaining: draftSettings.draftTimer,
       isTimerRunning: false,
       lastDraftAction: newLastAction,
-      showUndoButton: true,
       highlightedTeamIndex: draftMode === "auction" ? 
         (highlightedTeamIndex + highlightDirection >= teams.length ? 0 : 
          highlightedTeamIndex + highlightDirection < 0 ? teams.length - 1 :
@@ -611,7 +783,7 @@ export default function FantasyFootballDraft({
   };
 
   // Suppress unused variable warnings by referencing them
-  void showBidInterface; void getPlayersByPosition; void setRoomId; void setIsHost; void snakeDraftOrder; void error; void createRoom;
+  void showBidInterface; void getPlayersByPosition; void setRoomId; void snakeDraftOrder; void error; void createRoom;
 
   return (
     <div className="flex flex-col h-full bg-[#F0F2F5] text-gray-800 font-sans border border-black" style={{boxShadow:'8px 8px 0 #000'}}>
@@ -824,7 +996,8 @@ export default function FantasyFootballDraft({
                     Import Player Rankings
                   </label>
                   <div className="text-xs text-gray-600 mb-2">
-                    Upload a CSV file with player rankings. The CSV must include these column headers: RANK, POSITION, PLAYER, TEAM, BYE, AUC $, and PROJ. PTS
+                    Upload a CSV file with your personal player values. The CSV must include these column headers: RANK, POSITION, PLAYER, TEAM, BYE, AUC $, and PROJ. PTS. 
+                    Your values will appear in parentheses next to the host's values. Player names, teams, and positions must match the host data exactly.
                   </div>
                   <div className="flex items-center justify-center">
                     <input
@@ -868,6 +1041,55 @@ export default function FantasyFootballDraft({
                   </div>
                 </div>
               </div>
+
+              {/* Host-only: Global Player List Override */}
+              {isHost && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium border-b-2 border-black pb-2">Host Controls</h3>
+                  <div>
+                    <label className="block text-sm font-medium text-black mb-2">
+                      Override Global Player List
+                    </label>
+                    <div className="text-xs text-gray-600 mb-2">
+                      Upload a CSV file to replace the entire player list for all participants. This will override the default player rankings for everyone in the draft room.
+                    </div>
+                    <div className="flex items-center justify-center">
+                      <input
+                        ref={hostFileInputRef}
+                        type="file"
+                        accept=".csv"
+                        onChange={handleHostCsvUpload}
+                        className="hidden"
+                        id="host-csv-upload"
+                        disabled={isProcessingHostFile}
+                      />
+                      <label 
+                        htmlFor="host-csv-upload"
+                        className={`flex items-center justify-center px-4 py-2 border-2 border-black bg-[#FFD700] text-black cursor-pointer ${isProcessingHostFile ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        style={{ boxShadow: '2px 2px 0 #000' }}
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        {isProcessingHostFile ? 'Processing...' : 'Override Player List'}
+                      </label>
+                    </div>
+                    
+                    {hostCsvUploadStatus.status !== 'idle' && (
+                      <div className={`mt-2 text-sm ${hostCsvUploadStatus.status === 'success' ? 'text-green-600' : 'text-[#EF416E]'} flex items-center border border-black p-2`}>
+                        {hostCsvUploadStatus.status === 'success' ? (
+                          <Check className="h-4 w-4 mr-1" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4 mr-1" />
+                        )}
+                        {hostCsvUploadStatus.message}
+                      </div>
+                    )}
+
+                    <div className="mt-2 text-xs text-gray-600">
+                      <p className="font-medium text-orange-600">⚠️ Warning: This will replace the entire player list for all participants in the draft room.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               {/* Team Information */}
               <div className="space-y-4">
@@ -976,21 +1198,31 @@ export default function FantasyFootballDraft({
                 </div>
               </div>
               
-              <div className="flex justify-end space-x-3 pt-2">
+              <div className="flex justify-between items-center pt-2">
                 <button 
-                  onClick={() => setShowSettings(false)}
-                  className="px-4 py-2 border-2 border-black text-black bg-white"
-                  style={{ boxShadow: '2px 2px 0 #000' }}
+                  onClick={handleResetDraft}
+                  disabled={!isHost || draftHistory.length === 0}
+                  className={`px-4 py-2 border-2 border-red-600 text-red-600 bg-white hover:bg-red-50 ${(!isHost || draftHistory.length === 0) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  style={{ boxShadow: '2px 2px 0 #dc2626' }}
                 >
-                  Cancel
+                  Reset Draft
                 </button>
-                <button 
-                  onClick={() => handleSettingsUpdate(draftSettings)}
-                  className="px-4 py-2 bg-black text-white border-2 border-black"
-                  style={{ boxShadow: '2px 2px 0 #000' }}
-                >
-                  Save Settings
-                </button>
+                <div className="flex space-x-3">
+                  <button 
+                    onClick={() => setShowSettings(false)}
+                    className="px-4 py-2 border-2 border-black text-black bg-white"
+                    style={{ boxShadow: '2px 2px 0 #000' }}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => handleSettingsUpdate(draftSettings)}
+                    className="px-4 py-2 bg-black text-white border-2 border-black"
+                    style={{ boxShadow: '2px 2px 0 #000' }}
+                  >
+                    Save Settings
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1236,9 +1468,15 @@ export default function FantasyFootballDraft({
                           </td>
                           <td className="px-2 sm:px-3 py-1 sm:py-2 text-center text-xs text-[#EF416E] font-medium border-r border-black">
                             ${player.projectedValue}
+                            {player.localProjectedValue !== undefined && player.localProjectedValue !== player.projectedValue && (
+                              <span className="text-gray-500"> (${player.localProjectedValue})</span>
+                            )}
                           </td>
                           <td className="px-2 sm:px-3 py-1 sm:py-2 text-center text-xs text-[#04AEC5] font-medium border-r border-black hidden sm:table-cell">
                             {player.projectedPoints.toFixed(1)}
+                            {player.localProjectedPoints !== undefined && player.localProjectedPoints !== player.projectedPoints && (
+                              <span className="text-gray-500"> ({player.localProjectedPoints.toFixed(1)})</span>
+                            )}
                           </td>
                           <td className="px-2 sm:px-3 py-1 sm:py-2 text-center">
                             {draftMode === "auction" ? (
@@ -1333,9 +1571,15 @@ export default function FantasyFootballDraft({
                                 </td>
                                 <td className="px-3 sm:px-6 py-1 sm:py-2 whitespace-nowrap text-[11px] sm:text-xs text-[#EF416E] font-medium border-r border-black" style={equalColumnStyle}>
                                   ${player.projectedValue}
+                                  {player.localProjectedValue !== undefined && player.localProjectedValue !== player.projectedValue && (
+                                    <span className="text-gray-500"> (${player.localProjectedValue})</span>
+                                  )}
                                 </td>
                                 <td className="px-3 sm:px-6 py-1 sm:py-2 whitespace-nowrap text-[11px] sm:text-xs text-[#04AEC5] font-medium border-r border-black hidden sm:table-cell" style={equalColumnStyle}>
                                   {player.projectedPoints.toFixed(1)}
+                                  {player.localProjectedPoints !== undefined && player.localProjectedPoints !== player.projectedPoints && (
+                                    <span className="text-gray-500"> ({player.localProjectedPoints.toFixed(1)})</span>
+                                  )}
                                 </td>
                                 <td className="px-3 sm:px-6 py-1 sm:py-2 whitespace-nowrap text-center">
                                   {draftMode === "auction" ? (
@@ -1557,15 +1801,16 @@ export default function FantasyFootballDraft({
           </div>
           
           <div className="p-2 sm:p-3 border-b-2 border-black">
-            {/* Undo Button (appears after a pick is made) */}
-            {showUndoButton && (
+            {/* Undo Button (always visible when there are picks to undo) */}
+            {draftHistory.length > 0 && (
               <div className="mb-4">
                 <button
                   onClick={handleUndoDraft}
-                  className="w-full flex items-center justify-center px-3 py-2 bg-black text-white border-2 border-black"
+                  disabled={!isHost}
+                  className={`w-full flex items-center justify-center px-3 py-2 bg-black text-white border-2 border-black ${!isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
                   style={{ boxShadow: '2px 2px 0 #000' }}
                 >
-                  Undo Last Draft
+                  Undo Last Pick ({draftHistory.length} total)
                 </button>
               </div>
             )}
@@ -1597,11 +1842,21 @@ export default function FantasyFootballDraft({
                         </div>
                         <div className="flex flex-col items-center px-2 py-1 border-2 border-black bg-white min-w-[60px]" style={{boxShadow:'1px 1px 0 #000'}}>
                           <span className="text-[9px] uppercase font-bold text-gray-600">Auc $</span>
-                          <span className="text-sm font-bold text-[#EF416E]">${selectedPlayer.projectedValue}</span>
+                          <span className="text-sm font-bold text-[#EF416E]">
+                            ${selectedPlayer.projectedValue}
+                            {selectedPlayer.localProjectedValue !== undefined && selectedPlayer.localProjectedValue !== selectedPlayer.projectedValue && (
+                              <span className="text-gray-500 text-xs"> (${selectedPlayer.localProjectedValue})</span>
+                            )}
+                          </span>
                         </div>
                         <div className="flex flex-col items-center px-2 py-1 border-2 border-black bg-white min-w-[60px]" style={{boxShadow:'1px 1px 0 #000'}}>
                           <span className="text-[9px] uppercase font-bold text-gray-600">Proj</span>
-                          <span className="text-sm font-bold text-[#04AEC5]">{selectedPlayer.projectedPoints.toFixed(1)}</span>
+                          <span className="text-sm font-bold text-[#04AEC5]">
+                            {selectedPlayer.projectedPoints.toFixed(1)}
+                            {selectedPlayer.localProjectedPoints !== undefined && selectedPlayer.localProjectedPoints !== selectedPlayer.projectedPoints && (
+                              <span className="text-gray-500 text-xs"> ({selectedPlayer.localProjectedPoints.toFixed(1)})</span>
+                            )}
+                          </span>
                         </div>
                       </div>
                     </div>

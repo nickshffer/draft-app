@@ -19,11 +19,11 @@ interface FirebaseDraftState {
   currentBid: number;
   currentBidTeam: number | null;
   lastDraftAction: DraftAction | null;
-  showUndoButton: boolean;
   highlightedTeamIndex: number;
   highlightDirection: number;
   currentDraftTeam: number | null;
   draftedPlayers: number[];
+  customPlayerList?: Player[]; // Host can override the global player list
 }
 
 export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
@@ -142,6 +142,23 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
     }
   };
 
+  const updateCustomPlayerList = async (players: Player[]) => {
+    if (!isHost || !roomId) {
+      console.warn('Only host can update custom player list');
+      return;
+    }
+
+    try {
+      await update(ref(database, `draftRooms/${roomId}`), {
+        customPlayerList: players,
+        lastActivity: serverTimestamp()
+      });
+    } catch (err) {
+      console.error('Failed to update custom player list:', err);
+      setError('Failed to update player list');
+    }
+  };
+
   // Return state with fallbacks
   return {
     // Firebase state with defaults
@@ -168,11 +185,11 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
     currentBid: firebaseState.currentBid || 1,
     currentBidTeam: firebaseState.currentBidTeam || null,
     lastDraftAction: firebaseState.lastDraftAction || null,
-    showUndoButton: firebaseState.showUndoButton || false,
     highlightedTeamIndex: firebaseState.highlightedTeamIndex || 0,
     highlightDirection: firebaseState.highlightDirection || 1,
     currentDraftTeam: firebaseState.currentDraftTeam || null,
     draftedPlayers: firebaseState.draftedPlayers || [],
+    customPlayerList: firebaseState.customPlayerList || null,
     
     // Connection state
     isConnected,
@@ -180,6 +197,7 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
     
     // Actions
     updateFirebaseState,
-    createRoom
+    createRoom,
+    updateCustomPlayerList
   };
 }

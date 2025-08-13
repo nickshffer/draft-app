@@ -8,6 +8,9 @@ export interface Player {
   bye: number;
   projectedValue: number;
   projectedPoints: number;
+  // Local values for readers (not synced to Firebase)
+  localProjectedValue?: number;
+  localProjectedPoints?: number;
 }
 
 // Team types
@@ -57,7 +60,7 @@ export interface CsvUploadStatus {
 }
 
 // Position types
-export type Position = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DEF';
+export type Position = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DST';
 
 export interface PositionCategories {
   [key: string]: string;
@@ -103,4 +106,5 @@ export interface FantasyFootballDraftProps {
   initialRosterSize?: number;
   initialAuctionRounds?: number;
   draftTimerSeconds?: number;
+  isHost?: boolean;
 }

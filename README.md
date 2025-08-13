@@ -5,9 +5,27 @@ A modern, real-time fantasy football draft application built with React, TypeScr
 ## 🔥 **NEW: Real-time Multi-User Support**
 
 This app now supports **real-time collaboration** where:
-- **Host** controls the draft (makes picks, manages settings, runs timer)
-- **Viewers** see all draft activity live but can upload their own player rankings
-- **Everyone** sees the same draft state, but with their personal player values
+- **Host** (`/host`) controls the draft (makes picks, manages settings, runs timer)
+- **Readers** (`/`) see all draft activity live but can upload their own player rankings
+- **Everyone** sees the same draft state, but with their personal player values displayed in parentheses
+
+### 📊 **Personal Player Values**
+- Readers can upload CSV files with their own player valuations
+- Personal values appear in parentheses next to host values: `$45 ($52)`
+- Fuzzy matching helps identify misnamed players with suggestions
+- Player names, teams, and positions must match host data
+
+**CSV Format Requirements:**
+```csv
+RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
+1,RB,Christian McCaffrey,SF,9,65,285.5
+2,WR,A.J. Brown,PHI,7,52,260.1
+```
+
+**Error Handling:**
+- Mismatched names show suggestions: `"AJ Brown" not found. Did you mean "A.J. Brown"?`
+- Only matching players are updated with local values
+- Upload fails if no players match the host data
 
 ## Features
 
@@ -69,7 +87,9 @@ npm install
 npm run dev
 ```
 
-5. Open [http://localhost:5173](http://localhost:5173) in your browser
+5. Open your browser:
+   - **Host mode**: [http://localhost:5173/host](http://localhost:5173/host) (can make draft picks and changes)
+   - **Reader mode**: [http://localhost:5173/](http://localhost:5173/) (view-only, can upload personal CSV)
 
 ## 🔥 Firebase Setup Guide
 
@@ -138,9 +158,11 @@ const firebaseConfig = {
 ### Step 6: Test Real-time Features
 
 1. Start your dev server: `npm run dev`
-2. Open the app in two browser windows
-3. Make a draft pick in one window
-4. Watch it appear in the other window instantly! 🎉
+2. Open two browser windows:
+   - **Host**: `http://localhost:5173/host`
+   - **Reader**: `http://localhost:5173/`
+3. Make a draft pick in the host window
+4. Watch it appear in the reader window instantly! 🎉
 
 ## Available Scripts
 
@@ -165,15 +187,17 @@ src/
 
 ## How It Works
 
-### 🏠 **Host Mode**
+### 🏠 **Host Mode** (`/host`)
 - Controls all draft actions (picks, bids, timer)
 - Can modify settings and team information
 - Manages the draft flow and progression
+- Connection status shows "HOST"
 
-### 👀 **Viewer Mode**  
+### 👀 **Reader Mode** (`/`)
 - Sees all draft activity in real-time
 - Can upload personal player rankings via CSV
 - Cannot make draft picks or change settings
+- Connection status shows "VIEW"
 
 ### 📱 **Room System**
 - Each draft session has a unique room ID
