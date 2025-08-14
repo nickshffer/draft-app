@@ -2224,48 +2224,90 @@ export default function FantasyFootballDraft({
                     
                     {/* Bid controls */}
                     <div className="p-2 bg-[rgba(243,244,246,1)]">
-                      <div className="flex w-full justify-center items-stretch mb-3">
-                        <button 
-                          onClick={() => isHost && updateFirebaseState({ currentBid: Math.max(1, currentBid - 1) })}
-                          disabled={!isHost}
-                          className={`h-10 w-10 bg-black text-white border-2 border-black flex items-center justify-center ${!isHost ? 'opacity-50' : ''}`}
-                        >
-                          -
-                        </button>
-                        <input 
-                          type="number" 
-                          value={currentBid}
-                          onChange={(e) => isHost && updateFirebaseState({ currentBid: Math.max(1, parseInt(e.target.value) || 0) })}
-                          disabled={!isHost}
-                          className={`h-10 flex-1 min-w-0 text-center bg-white border-y-2 border-black text-black text-lg font-bold focus:outline-none ${!isHost ? 'opacity-50' : ''}`}
-                          min="1"
-                        />
-                        <button 
-                          onClick={() => isHost && updateFirebaseState({ currentBid: currentBid + 1 })}
-                          disabled={!isHost}
-                          className={`h-10 w-10 bg-black text-white border-2 border-black flex items-center justify-center ${!isHost ? 'opacity-50' : ''}`}
-                        >
-                          +
-                        </button>
-                      </div>
+                      {(() => {
+                        // Calculate the maximum bid across all teams that can still bid
+                        const eligibleTeams = teams.filter(team => canTeamBid(team, draftHistory, draftSettings.auctionRounds, currentRound));
+                        const globalMaxBid = eligibleTeams.length > 0 ? Math.max(...eligibleTeams.map(team => getMaxBidForTeam(team, draftHistory, draftSettings.auctionRounds, currentRound))) : currentBid;
+                        
+                        return (
+                          <>
+                            <div className="flex w-full justify-center items-stretch mb-3">
+                              <button 
+                                onClick={() => isHost && updateFirebaseState({ currentBid: Math.max(1, currentBid - 1) })}
+                                disabled={!isHost || currentBid <= 1}
+                                className={`h-10 w-10 bg-black text-white border-2 border-black flex items-center justify-center ${(!isHost || currentBid <= 1) ? 'opacity-50' : ''}`}
+                              >
+                                -
+                              </button>
+                              <input 
+                                type="number" 
+                                value={currentBid}
+                                onChange={(e) => {
+                                  if (isHost) {
+                                    const newBid = Math.max(1, Math.min(globalMaxBid, parseInt(e.target.value) || 0));
+                                    updateFirebaseState({ currentBid: newBid });
+                                  }
+                                }}
+                                disabled={!isHost}
+                                className={`h-10 flex-1 min-w-0 text-center bg-white border-y-2 border-black text-black text-lg font-bold focus:outline-none ${!isHost ? 'opacity-50' : ''}`}
+                                min="1"
+                                max={globalMaxBid}
+                              />
+                              <button 
+                                onClick={() => isHost && updateFirebaseState({ currentBid: Math.min(globalMaxBid, currentBid + 1) })}
+                                disabled={!isHost || currentBid >= globalMaxBid}
+                                className={`h-10 w-10 bg-black text-white border-2 border-black flex items-center justify-center ${(!isHost || currentBid >= globalMaxBid) ? 'opacity-50' : ''}`}
+                              >
+                                +
+                              </button>
+                            </div>
+                            {eligibleTeams.length > 0 && globalMaxBid < 999999 && (
+                              <div className="text-xs text-center text-gray-600 mb-2">
+                                Max bid: ${globalMaxBid} (teams need ${draftSettings.auctionRounds - currentRound + 1} auction picks)
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                       
                       {/* Team selection grid */}
                       <div className="grid grid-cols-2 gap-2 mb-3">
                         {teams.map(team => {
                           const isSelected = currentBidTeam === team.id;
-                          const canAfford = team.budget >= currentBid;
+                          const canBidForAuction = canTeamBid(team, draftHistory, draftSettings.auctionRounds, currentRound);
+                          const maxBid = getMaxBidForTeam(team, draftHistory, draftSettings.auctionRounds, currentRound);
+                          const canAffordBid = currentBid <= maxBid;
+                          const canBid = canBidForAuction && canAffordBid;
+                          const auctionPlayerCount = getAuctionPlayersForTeam(team, draftHistory, draftSettings.auctionRounds);
+                          
                           return (
                             <button
                               key={team.id}
-                              onClick={() => canAfford && handleBid(team.id, currentBid)}
-                              disabled={!canAfford}
-                              className={`py-1 px-2 border-2 border-black text-sm font-bold flex items-center justify-between ${
+                              onClick={() => canBid && isHost && handleBid(team.id, currentBid)}
+                              disabled={!canBid || !isHost}
+                              className={`py-1 px-2 border-2 border-black text-sm font-bold flex flex-col ${
                                 isSelected ? 'bg-[#04AEC5] text-white' : 'bg-white text-black'
-                              } ${!canAfford ? 'opacity-40' : ''}`}
+                              } ${!canBid ? 'opacity-40' : ''}`}
                               style={{ boxShadow: isSelected ? 'none' : '1px 1px 0 #000' }}
                             >
-                              <span className="truncate">{team.owner}</span>
-                              <span className={`ml-1 text-xs ${isSelected ? 'text-white' : 'text-[#04AEC5]'}`}>${team.budget}</span>
+                              <div className="flex items-center justify-between w-full">
+                                <span className="truncate text-xs">{team.owner}</span>
+                                <span className={`ml-1 text-xs ${isSelected ? 'text-white' : 'text-[#04AEC5]'}`}>
+                                  {canBidForAuction ? `$${maxBid}` : 'FULL'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between w-full text-xs">
+                                <span className={`${isSelected ? 'text-white' : 'text-gray-600'}`}>
+                                  {auctionPlayerCount}/{draftSettings.auctionRounds}
+                                </span>
+                                {!canBidForAuction ? (
+                                  <span className="text-red-500 text-xs">FULL</span>
+                                ) : !canAffordBid ? (
+                                  <span className="text-red-500 text-xs">MAX ${maxBid}</span>
+                                ) : (
+                                  <span className={`${isSelected ? 'text-white' : 'text-green-600'}`}>✓</span>
+                                )}
+                              </div>
                             </button>
                           );
                         })}
