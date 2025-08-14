@@ -15,10 +15,107 @@ import sampleCsvData from './data/sample.csv?raw';
 // Import components
 import FontLoader from './components/FontLoader';
 import PositionBadge from './components/PositionBadge';
+import WelcomePopup from './components/WelcomePopup';
 
 // Import Firebase hook
 import { useFirebaseDraft } from './hooks/useFirebaseDraft';
 import { useCsvUpload } from './hooks/useCsvUpload';
+
+// Import welcome utilities
+import { shouldShowWelcome, dismissWelcome } from './utils/welcomePreferences';
+
+// Roster slot definitions
+interface RosterSlot {
+  id: string;
+  position: string;
+  label: string;
+  eligiblePositions: string[];
+}
+
+const ROSTER_STRUCTURE: RosterSlot[] = [
+  { id: 'qb', position: 'QB', label: 'QB', eligiblePositions: ['QB'] },
+  { id: 'wr1', position: 'WR', label: 'WR', eligiblePositions: ['WR'] },
+  { id: 'wr2', position: 'WR', label: 'WR', eligiblePositions: ['WR'] },
+  { id: 'wr3', position: 'WR', label: 'WR', eligiblePositions: ['WR'] },
+  { id: 'rb1', position: 'RB', label: 'RB', eligiblePositions: ['RB'] },
+  { id: 'rb2', position: 'RB', label: 'RB', eligiblePositions: ['RB'] },
+  { id: 'flex', position: 'FLEX', label: 'FLEX', eligiblePositions: ['WR', 'RB', 'TE'] },
+  { id: 'te', position: 'TE', label: 'TE', eligiblePositions: ['TE'] },
+  { id: 'k', position: 'K', label: 'K', eligiblePositions: ['K'] },
+  { id: 'def', position: 'DEF', label: 'DEF', eligiblePositions: ['DEF'] }
+];
+
+interface AssignedRosterSlot extends RosterSlot {
+  player?: Player;
+  isEmpty: boolean;
+}
+
+// Auction constraint helper functions
+const getAuctionPlayersForTeam = (team: Team, draftHistory: any[], auctionRounds: number): number => {
+  // Count how many players this team has drafted during auction rounds
+  return draftHistory.filter(pick => 
+    pick.teamId === team.id && pick.round <= auctionRounds
+  ).length;
+};
+
+const getMaxBidForTeam = (team: Team, draftHistory: any[], auctionRounds: number, currentRound: number): number => {
+  if (currentRound > auctionRounds) return team.budget; // No constraints in snake rounds
+  
+  const auctionPlayersDrafted = getAuctionPlayersForTeam(team, draftHistory, auctionRounds);
+  const remainingAuctionRounds = auctionRounds - currentRound + 1;
+  const playersStillNeeded = remainingAuctionRounds - auctionPlayersDrafted;
+  
+  if (playersStillNeeded <= 0) return 0; // Team already has their auction picks
+  
+  // Must save at least $1 for each remaining required player (minus this one)
+  const dollarsToReserve = Math.max(0, playersStillNeeded - 1);
+  return Math.max(1, team.budget - dollarsToReserve);
+};
+
+const canTeamBid = (team: Team, draftHistory: any[], auctionRounds: number, currentRound: number): boolean => {
+  if (currentRound > auctionRounds) return false; // No bidding in snake rounds
+  
+  const auctionPlayersDrafted = getAuctionPlayersForTeam(team, draftHistory, auctionRounds);
+  const remainingAuctionRounds = auctionRounds - currentRound + 1;
+  
+  // Team can bid if they haven't reached their auction player limit
+  return auctionPlayersDrafted < remainingAuctionRounds;
+};
+
+// Function to assign players to roster slots
+const assignPlayersToRosterSlots = (players: Player[], rosterSize: number): AssignedRosterSlot[] => {
+  const slots: AssignedRosterSlot[] = ROSTER_STRUCTURE.map(slot => ({
+    ...slot,
+    isEmpty: true
+  }));
+  
+  // Add bench slots
+  const benchSlotsNeeded = Math.max(0, rosterSize - ROSTER_STRUCTURE.length);
+  for (let i = 0; i < benchSlotsNeeded; i++) {
+    slots.push({
+      id: `bench${i + 1}`,
+      position: 'BEN',
+      label: 'BEN',
+      eligiblePositions: ['QB', 'WR', 'RB', 'TE', 'K', 'DEF'], // Any position can be benched
+      isEmpty: true
+    });
+  }
+
+  // Assign players to slots in draft order
+  for (const player of players) {
+    // Find the first available slot that can hold this player
+    const availableSlot = slots.find(slot => 
+      slot.isEmpty && slot.eligiblePositions.includes(player.position)
+    );
+    
+    if (availableSlot) {
+      availableSlot.player = player;
+      availableSlot.isEmpty = false;
+    }
+  }
+
+  return slots;
+};
 
 // Parse CSV data into Player objects
 const parseCsvToPlayers = (csvText: string): Player[] => {
@@ -137,6 +234,7 @@ export default function FantasyFootballDraft({
   // UI state (stays local)
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("players");
+  const [showWelcomePopup, setShowWelcomePopup] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [positionFilter, setPositionFilter] = useState("ALL");
   const [sortBy, setSortBy] = useState<SortBy>("rank");
@@ -246,10 +344,12 @@ export default function FantasyFootballDraft({
           .sort((a, b) => b.budget - a.budget)
           .map(t => t.id);
         
-        // Update Firebase state to switch to snake mode
+        // Update Firebase state to switch to snake mode and start timer
         updateFirebaseState({
           draftMode: "snake",
-          snakeDraftOrder: order
+          snakeDraftOrder: order,
+          isTimerRunning: true,
+          timeRemaining: draftSettings.draftTimer
         });
       }
     } else {
@@ -295,6 +395,13 @@ export default function FantasyFootballDraft({
       setExpandedTeams({ [teamToExpandId]: true });
     }
   }, [highlightedTeamIndex, currentDraftTeam, draftMode, teams]);
+
+  // Show welcome popup on first visit (after connection is established)
+  useEffect(() => {
+    if (isConnected && shouldShowWelcome(isHost)) {
+      setShowWelcomePopup(true);
+    }
+  }, [isConnected, isHost]);
 
   // Update the highlighted team when auction is complete (Host only)
   const updateHighlightedTeam = async () => {
@@ -730,7 +837,12 @@ export default function FantasyFootballDraft({
     ];
 
     const newPick = currentPick + 1;
-    const newRound = newPick % teams.length === 1 ? currentRound + 1 : currentRound;
+    
+    // Calculate new round using the original logic
+    let newRound = currentRound;
+    if (currentPick % teams.length === 0) {
+      newRound = currentRound + 1;
+    }
 
     // Update expanded teams locally
     setExpandedTeams(prev => ({
@@ -749,7 +861,7 @@ export default function FantasyFootballDraft({
       currentBid: 1,
       currentBidTeam: null,
       timeRemaining: draftSettings.draftTimer,
-      isTimerRunning: false,
+      isTimerRunning: draftMode === "snake", // Auto-start timer in snake mode
       lastDraftAction: newLastAction
     });
 
@@ -923,6 +1035,9 @@ export default function FantasyFootballDraft({
     padding: '0'
   };
 
+  // Determine if draft has started (has picks) - used to lock certain settings
+  const draftHasStarted = draftHistory.length > 0;
+
   // Suppress unused variable warnings by referencing them
   void showBidInterface; void getPlayersByPosition; void setRoomId; void snakeDraftOrder; void error; void createRoom;
 
@@ -1072,12 +1187,17 @@ export default function FantasyFootballDraft({
                   <input 
                     type="number" 
                     value={draftSettings.auctionBudget}
-                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, auctionBudget: parseInt(e.target.value)} })}
-                    disabled={!isHost}
-                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
+                    onChange={(e) => isHost && !draftHasStarted && updateFirebaseState({ draftSettings: {...draftSettings, auctionBudget: parseInt(e.target.value)} })}
+                    disabled={!isHost || draftHasStarted}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${(!isHost || draftHasStarted) ? 'opacity-50' : ''}`}
                     min="1"
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
+                  {draftHasStarted && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Cannot change after draft has started
+                    </div>
+                  )}
                 </div>
                 
                 <div>
@@ -1087,12 +1207,17 @@ export default function FantasyFootballDraft({
                   <input 
                     type="number" 
                     value={draftSettings.rosterSize}
-                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, rosterSize: parseInt(e.target.value)} })}
-                    disabled={!isHost}
-                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
+                    onChange={(e) => isHost && !draftHasStarted && updateFirebaseState({ draftSettings: {...draftSettings, rosterSize: parseInt(e.target.value)} })}
+                    disabled={!isHost || draftHasStarted}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${(!isHost || draftHasStarted) ? 'opacity-50' : ''}`}
                     min="1"
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
+                  {draftHasStarted && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Cannot change after draft has started
+                    </div>
+                  )}
                 </div>
                 
                 <div>
@@ -1102,13 +1227,18 @@ export default function FantasyFootballDraft({
                   <input 
                     type="number" 
                     value={draftSettings.auctionRounds}
-                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, auctionRounds: parseInt(e.target.value)} })}
-                    disabled={!isHost}
-                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
+                    onChange={(e) => isHost && !draftHasStarted && updateFirebaseState({ draftSettings: {...draftSettings, auctionRounds: parseInt(e.target.value)} })}
+                    disabled={!isHost || draftHasStarted}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${(!isHost || draftHasStarted) ? 'opacity-50' : ''}`}
                     min="0"
                     max={draftSettings.rosterSize}
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
+                  {draftHasStarted && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Cannot change after draft has started
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1118,13 +1248,18 @@ export default function FantasyFootballDraft({
                   <input
                     type="number"
                     value={draftSettings.teamCount}
-                    onChange={(e) => isHost && updateFirebaseState({ draftSettings: {...draftSettings, teamCount: Math.max(2, parseInt(e.target.value))} })}
-                    disabled={!isHost}
-                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
+                    onChange={(e) => isHost && !draftHasStarted && updateFirebaseState({ draftSettings: {...draftSettings, teamCount: Math.max(2, parseInt(e.target.value))} })}
+                    disabled={!isHost || draftHasStarted}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${(!isHost || draftHasStarted) ? 'opacity-50' : ''}`}
                     min="2"
                     max="20"
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
+                  {draftHasStarted && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Cannot change after draft has started
+                    </div>
+                  )}
                 </div>
                 
                 <div>
@@ -1349,6 +1484,27 @@ export default function FantasyFootballDraft({
                         )}
                       </div>
                     ))}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Help Section */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium border-b-2 border-black pb-2">Help</h3>
+                <div>
+                  <button
+                    onClick={() => {
+                      setShowSettings(false);
+                      setShowWelcomePopup(true);
+                    }}
+                    className="w-full flex items-center justify-center px-4 py-3 bg-[#04AEC5] text-white border-2 border-black hover:bg-[#8ED4D3]"
+                    style={{ boxShadow: '2px 2px 0 #000' }}
+                  >
+                    <AlertCircle className="w-4 h-4 mr-2" />
+                    Show Welcome Instructions
+                  </button>
+                  <div className="text-xs text-gray-600 mt-2 text-center">
+                    View role-specific instructions for {isHost ? 'hosting' : 'viewing'} a draft
                   </div>
                 </div>
               </div>
@@ -1875,61 +2031,70 @@ export default function FantasyFootballDraft({
                           Players: {team.players.length}/{draftSettings.rosterSize}
                         </div>
                       </div>
-                      {team.players.length > 0 ? (
-                        <div className="overflow-x-auto border border-black">
-                          <table className="min-w-full border-collapse">
-                            <thead className="bg-gray-100 border-b border-black">
-                              <tr>
-                                <th className="px-2 sm:px-4 py-1 sm:py-2 text-left text-xs font-medium text-black uppercase tracking-wider border-r border-black">
-                                  Player
-                                </th>
-                                <th className="px-2 sm:px-4 py-1 sm:py-2 text-left text-xs font-medium text-black uppercase tracking-wider border-r border-black" style={equalColumnStyle}>
-                                  Pos
-                                </th>
-                                <th className="px-2 sm:px-4 py-1 sm:py-2 text-left text-xs font-medium text-black uppercase tracking-wider border-r border-black hidden sm:table-cell" style={equalColumnStyle}>
-                                  Team
-                                </th>
-                                <th className="px-2 sm:px-4 py-1 sm:py-2 text-left text-xs font-medium text-black uppercase tracking-wider" style={equalColumnStyle}>
-                                  {draftMode === "auction" ? "Price" : "Round"}
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {team.players.map((player, playerIdx) => {
-                                const draftDetails = getPlayerDraftDetails(player.id, team.id);
-                                return (
-                                  <tr key={player.id} className={`${playerIdx % 2 === 0 ? 'bg-white' : 'bg-[#FFE5F0]'} border-b border-black last:border-b-0`}>
-                                    <td className="px-2 sm:px-4 py-1 sm:py-2 whitespace-nowrap font-medium text-xs sm:text-sm text-black border-r border-black">
-                                      {player.name}
-                                    </td>
-                                    <td className="px-2 sm:px-4 py-1 sm:py-2 whitespace-nowrap border-r border-black text-center" style={equalColumnStyle}>
-                                      <PositionBadge pos={player.position} />
-                                    </td>
-                                    <td className="px-2 sm:px-4 py-1 sm:py-2 whitespace-nowrap text-xs sm:text-sm text-black border-r border-black hidden sm:table-cell" style={equalColumnStyle}>
-                                      {player.team}
-                                    </td>
-                                    <td className="px-2 sm:px-4 py-1 sm:py-2 whitespace-nowrap text-xs sm:text-sm font-medium" style={equalColumnStyle}>
-                                      {draftDetails ? (
-                                        draftMode === "auction" ? (
-                                          <span className="text-[#EF416E]">${draftDetails.amount}</span>
+                      {(() => {
+                        const rosterSlots = assignPlayersToRosterSlots(team.players, draftSettings.rosterSize);
+                        return (
+                          <div className="overflow-x-auto border border-black">
+                            <table className="min-w-full border-collapse">
+                              <thead className="bg-gray-100 border-b border-black">
+                                <tr>
+                                  <th className="px-2 sm:px-4 py-1 sm:py-2 text-left text-xs font-medium text-black uppercase tracking-wider border-r border-black" style={equalColumnStyle}>
+                                    Slot
+                                  </th>
+                                  <th className="px-2 sm:px-4 py-1 sm:py-2 text-left text-xs font-medium text-black uppercase tracking-wider border-r border-black">
+                                    Player
+                                  </th>
+                                  <th className="px-2 sm:px-4 py-1 sm:py-2 text-left text-xs font-medium text-black uppercase tracking-wider border-r border-black hidden sm:table-cell" style={equalColumnStyle}>
+                                    Team
+                                  </th>
+                                  <th className="px-2 sm:px-4 py-1 sm:py-2 text-left text-xs font-medium text-black uppercase tracking-wider" style={equalColumnStyle}>
+                                    {draftMode === "auction" ? "Price" : "Round"}
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rosterSlots.map((slot, slotIdx) => {
+                                  const draftDetails = slot.player ? getPlayerDraftDetails(slot.player.id, team.id) : null;
+                                  const isStartingSlot = slot.position !== 'BEN';
+                                  return (
+                                    <tr key={slot.id} className={`${slotIdx % 2 === 0 ? 'bg-white' : 'bg-[#FFE5F0]'} border-b border-black last:border-b-0 ${isStartingSlot ? 'font-medium' : ''}`}>
+                                      <td className={`px-2 sm:px-4 py-1 sm:py-2 whitespace-nowrap text-xs sm:text-sm border-r border-black text-center ${isStartingSlot ? 'bg-gray-50 font-bold' : ''}`} style={equalColumnStyle}>
+                                        <span className={`px-1 py-0.5 rounded text-xs ${isStartingSlot ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
+                                          {slot.label}
+                                        </span>
+                                      </td>
+                                      <td className="px-2 sm:px-4 py-1 sm:py-2 whitespace-nowrap text-xs sm:text-sm text-black border-r border-black">
+                                        {slot.player ? (
+                                          <div className="flex items-center space-x-2">
+                                            <span className="font-medium">{slot.player.name}</span>
+                                            <PositionBadge pos={slot.player.position} />
+                                          </div>
                                         ) : (
-                                          <span className="text-[#04AEC5]">R{draftDetails.round}</span>
-                                        )
-                                      ) : (
-                                        "-"
-                                      )}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <div className="text-center text-black py-4 text-sm border border-black">
-                          No players drafted yet
-                        </div>
-                      )}
+                                          <span className="text-gray-400 italic">Empty</span>
+                                        )}
+                                      </td>
+                                      <td className="px-2 sm:px-4 py-1 sm:py-2 whitespace-nowrap text-xs sm:text-sm text-black border-r border-black hidden sm:table-cell" style={equalColumnStyle}>
+                                        {slot.player?.team || '-'}
+                                      </td>
+                                      <td className="px-2 sm:px-4 py-1 sm:py-2 whitespace-nowrap text-xs sm:text-sm font-medium" style={equalColumnStyle}>
+                                        {draftDetails ? (
+                                          draftMode === "auction" ? (
+                                            <span className="text-[#EF416E]">${draftDetails.amount}</span>
+                                          ) : (
+                                            <span className="text-[#04AEC5]">R{draftDetails.round}</span>
+                                          )
+                                        ) : (
+                                          "-"
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}
@@ -2195,6 +2360,18 @@ export default function FantasyFootballDraft({
           </div>
         </div>
       </div>
+
+      {/* Welcome Popup */}
+      {showWelcomePopup && (
+        <WelcomePopup
+          isHost={isHost}
+          onClose={() => setShowWelcomePopup(false)}
+          onDontShowAgain={() => {
+            dismissWelcome(isHost);
+            setShowWelcomePopup(false);
+          }}
+        />
+      )}
     </div>
   );
 }
