@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Search, Settings, DollarSign, Users, Clock, ChevronDown, ChevronUp, X, Check, ChevronRight, Edit, Save, Upload, AlertCircle } from "lucide-react";
+import { Search, Settings, DollarSign, Users, Clock, ChevronDown, ChevronUp, X, Check, ChevronRight, Edit, Save, Upload, AlertCircle, Undo } from "lucide-react";
 import Fuse from 'fuse.js';
 
 // Import types
@@ -233,6 +233,93 @@ export default function FantasyFootballDraft({
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, [roomId]);
+
+  // Switch from auction to snake draft when auction rounds are completed (Host only)
+  useEffect(() => {
+    if (!isHost || !isConnected || teams.length === 0) return;
+    
+    if (currentRound > draftSettings.auctionRounds) {
+      // Only switch if we're currently in auction mode
+      if (draftMode === "auction") {
+        // Compute draft order based on remaining budget (descending)
+        const order = [...teams]
+          .sort((a, b) => b.budget - a.budget)
+          .map(t => t.id);
+        
+        // Update Firebase state to switch to snake mode
+        updateFirebaseState({
+          draftMode: "snake",
+          snakeDraftOrder: order
+        });
+      }
+    } else {
+      // Make sure we're in auction mode for auction rounds
+      if (draftMode === "snake") {
+        updateFirebaseState({
+          draftMode: "auction",
+          snakeDraftOrder: []
+        });
+      }
+    }
+  }, [isHost, isConnected, currentRound, draftSettings.auctionRounds, teams, draftMode, updateFirebaseState]);
+
+  // Calculate current team on the clock for snake mode (Host only)
+  useEffect(() => {
+    if (!isHost || !isConnected) return;
+    
+    if (draftMode === "auction") {
+      // In auction mode, any team can bid
+      if (currentDraftTeam !== null) {
+        updateFirebaseState({ currentDraftTeam: null });
+      }
+    } else if (draftMode === "snake") {
+      // In snake mode, calculate based on round and pick
+      if (snakeDraftOrder.length === 0 || teams.length === 0) return;
+      
+      const picksIntoSnake = (currentPick - 1) % teams.length; // 0-based within round
+      const isEvenRound = (currentRound - draftSettings.auctionRounds) % 2 === 0;
+      let orderIndex = isEvenRound ? (snakeDraftOrder.length - 1 - picksIntoSnake) : picksIntoSnake;
+      orderIndex = ((orderIndex % snakeDraftOrder.length) + snakeDraftOrder.length) % snakeDraftOrder.length; // safe
+      const newCurrentDraftTeam = snakeDraftOrder[orderIndex];
+      
+      if (currentDraftTeam !== newCurrentDraftTeam) {
+        updateFirebaseState({ currentDraftTeam: newCurrentDraftTeam });
+      }
+    }
+  }, [isHost, isConnected, currentRound, currentPick, draftMode, teams.length, draftSettings.auctionRounds, snakeDraftOrder, currentDraftTeam, updateFirebaseState]);
+
+  // Auto-expand highlighted/current team accordion
+  useEffect(() => {
+    const teamToExpandId = draftMode === "auction" ? teams[highlightedTeamIndex]?.id : currentDraftTeam;
+    if (teamToExpandId) {
+      setExpandedTeams({ [teamToExpandId]: true });
+    }
+  }, [highlightedTeamIndex, currentDraftTeam, draftMode, teams]);
+
+  // Update the highlighted team when auction is complete (Host only)
+  const updateHighlightedTeam = async () => {
+    if (!isHost || draftMode !== "auction") return;
+    
+    // Calculate next team index based on current direction
+    let nextIndex = highlightedTeamIndex + highlightDirection;
+    let nextDirection = highlightDirection;
+    
+    // Check if we need to reverse direction
+    if (nextIndex >= teams.length) {
+      // Reached the end, reverse direction
+      nextDirection = -1;
+      nextIndex = teams.length - 2; // Second to last team
+    } else if (nextIndex < 0) {
+      // Reached the beginning, reverse direction
+      nextDirection = 1;
+      nextIndex = 1; // Second team
+    }
+    
+    await updateFirebaseState({
+      highlightedTeamIndex: nextIndex,
+      highlightDirection: nextDirection
+    });
+  };
 
 
   // Handle host CSV upload for global player list override
@@ -663,14 +750,15 @@ export default function FantasyFootballDraft({
       currentBidTeam: null,
       timeRemaining: draftSettings.draftTimer,
       isTimerRunning: false,
-      lastDraftAction: newLastAction,
-      highlightedTeamIndex: draftMode === "auction" ? 
-        (highlightedTeamIndex + highlightDirection >= teams.length ? 0 : 
-         highlightedTeamIndex + highlightDirection < 0 ? teams.length - 1 :
-         highlightedTeamIndex + highlightDirection) : highlightedTeamIndex
+      lastDraftAction: newLastAction
     });
 
     setShowBidInterface(false);
+    
+    // Update highlighted team after auction complete
+    if (draftMode === "auction") {
+      await updateHighlightedTeam();
+    }
   };
 
   // Get player with local values merged in
@@ -1884,6 +1972,7 @@ export default function FantasyFootballDraft({
                   className={`w-full flex items-center justify-center px-3 py-2 bg-black text-white border-2 border-black ${!isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
                   style={{ boxShadow: '2px 2px 0 #000' }}
                 >
+                  <Undo className="w-4 h-4 mr-2" />
                   Undo Last Pick ({draftHistory.length} total)
                 </button>
               </div>
