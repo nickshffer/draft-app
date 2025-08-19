@@ -82,6 +82,23 @@ const canTeamBid = (team: Team, draftHistory: any[], auctionRounds: number, curr
   return auctionPlayersDrafted < auctionRounds;
 };
 
+// Helper function to sort teams by budget with random tiebreaker
+const sortTeamsByBudgetWithTiebreaker = (teams: Team[]): Team[] => {
+  return [...teams].sort((a, b) => {
+    // Primary sort: higher budget first
+    if (b.budget !== a.budget) {
+      return b.budget - a.budget;
+    }
+    
+    // Tiebreaker: create pseudo-random but deterministic ordering based on team properties
+    // This ensures teams with same budget get a consistent but randomized order
+    const hashA = (a.id * 31 + a.name.length * 17 + a.owner.length * 13) % 1000;
+    const hashB = (b.id * 31 + b.name.length * 17 + b.owner.length * 13) % 1000;
+    
+    return hashA - hashB;
+  });
+};
+
 // Function to assign players to roster slots
 const assignPlayersToRosterSlots = (players: Player[], rosterSize: number): AssignedRosterSlot[] => {
   const slots: AssignedRosterSlot[] = ROSTER_STRUCTURE.map(slot => ({
@@ -241,8 +258,8 @@ export default function FantasyFootballDraft({
     await updateFirebaseState({ currentBid: newBid }, 'update_current_bid', {
       previousBid: currentBid,
       newBid,
-      playerId: selectedPlayer?.id || null,
-      playerName: selectedPlayer?.name || null
+      playerId: selectedPlayer && selectedPlayer.id !== undefined ? selectedPlayer.id : null,
+      playerName: selectedPlayer && selectedPlayer.name !== undefined ? selectedPlayer.name : null
     });
   };
 
@@ -381,10 +398,9 @@ export default function FantasyFootballDraft({
     if (currentRound > draftSettings.auctionRounds) {
       // Only switch if we're currently in auction mode
       if (draftMode === "auction") {
-        // Compute draft order based on remaining budget (descending)
-        const order = [...teams]
-          .sort((a, b) => b.budget - a.budget)
-          .map(t => t.id);
+        // Compute draft order based on remaining budget (descending) with random tiebreaker
+        const sortedTeams = sortTeamsByBudgetWithTiebreaker(teams);
+        const order = sortedTeams.map(t => t.id);
         
         // Update Firebase state to switch to snake mode and start timer
         (async () => {
@@ -787,19 +803,7 @@ export default function FantasyFootballDraft({
     }));
   };
 
-  // Auto-expand highlighted/current team accordion
-  useEffect(() => {
-    const teamToExpandId = draftMode === "auction" ? teams[highlightedTeamIndex]?.id : currentDraftTeam;
-    if (teamToExpandId) {
-      setExpandedTeams(prev => {
-        // Only update if this team isn't already expanded
-        if (!prev[teamToExpandId]) {
-          return { ...prev, [teamToExpandId]: true };
-        }
-        return prev;
-      });
-    }
-  }, [highlightedTeamIndex, currentDraftTeam, draftMode, teams.length]); // Use teams.length instead of teams
+  // Note: Teams should only expand/retract on user action, not automatically
 
   // Undo button is always visible when there are picks to undo (no auto-hide)
 
@@ -837,10 +841,9 @@ export default function FantasyFootballDraft({
     let newCurrentDraftTeam = currentDraftTeam;
     
     if (newDraftMode === "snake") {
-      // Recalculate snake order based on team budgets after undo
-      newSnakeDraftOrder = [...updatedTeams]
-        .sort((a, b) => b.budget - a.budget)
-        .map(t => t.id);
+      // Recalculate snake order based on team budgets after undo with random tiebreaker
+      const sortedTeams = sortTeamsByBudgetWithTiebreaker(updatedTeams);
+      newSnakeDraftOrder = sortedTeams.map(t => t.id);
       
       // Calculate current draft team for snake mode
       const snakeRound = newRound - draftSettings.auctionRounds; // 1-based snake round
@@ -1005,11 +1008,7 @@ export default function FantasyFootballDraft({
       newRound = currentRound + 1;
     }
 
-    // Update expanded teams locally
-    setExpandedTeams(prev => ({
-      ...prev,
-      [teamId]: true
-    }));
+    // Note: Teams should only expand/retract on user action, not automatically when drafting
 
     // Log the draft pick
     const draftTeam = teams.find(t => t.id === teamId);
@@ -1068,6 +1067,8 @@ export default function FantasyFootballDraft({
   const handlePlayerSelect = async (player: Player) => {
     if (!isHost) return;
     
+
+    
     await logger.logPlayerSelection(player, selectedPlayer);
     
     await updateFirebaseState({
@@ -1080,7 +1081,7 @@ export default function FantasyFootballDraft({
       playerId: player.id,
       playerName: player.name,
       playerPosition: player.position,
-      previousPlayerId: selectedPlayer?.id || null
+      previousPlayerId: selectedPlayer && selectedPlayer.id !== undefined ? selectedPlayer.id : null
     });
 
     setShowBidInterface(true);
@@ -1214,8 +1215,8 @@ export default function FantasyFootballDraft({
     return acc;
   }, {} as Record<string, Player[]>);
 
-  // Sort teams by remaining budget (for snake draft order)
-  const sortedTeamsByBudget = [...teams].sort((a, b) => b.budget - a.budget);
+  // Sort teams by remaining budget (for snake draft order) with random tiebreaker
+  const sortedTeamsByBudget = sortTeamsByBudgetWithTiebreaker(teams);
 
   // Group roster players by position - Used in Team Rosters tab
   const getPlayersByPosition = (teamPlayers: Player[] = []) => {

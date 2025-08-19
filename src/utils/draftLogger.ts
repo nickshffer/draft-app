@@ -58,12 +58,17 @@ class DraftLogger {
         return;
       }
 
+      const sanitizedMetadata = this.sanitizeValue(metadata);
+      
+
+
       const logEntry: DraftLogEntry = {
         timestamp: serverTimestamp(),
         roomId,
         action,
         changes,
-        metadata: this.sanitizeValue(metadata)
+        // Deep clone the sanitized metadata to prevent mutations
+        metadata: JSON.parse(JSON.stringify(sanitizedMetadata))
       };
 
       // Add to queue for processing
@@ -91,12 +96,17 @@ class DraftLogger {
       newValue: description
     }];
 
+    const sanitizedMetadata = this.sanitizeValue(metadata);
+    
+
+
     const logEntry: DraftLogEntry = {
       timestamp: serverTimestamp(),
       roomId,
       action,
       changes,
-      metadata: this.sanitizeValue(metadata)
+      // Deep clone the sanitized metadata to prevent mutations
+      metadata: JSON.parse(JSON.stringify(sanitizedMetadata))
     };
 
     this.logQueue.push(logEntry);

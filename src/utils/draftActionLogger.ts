@@ -123,10 +123,10 @@ export class DraftActionLogger {
       { selectedPlayer: player },
       {
         isHost: this.isHost,
-        playerId: player?.id || null,
-        playerName: player?.name || null,
-        playerPosition: player?.position || null,
-        prevPlayerId: prevPlayer?.id || null
+        playerId: player && player.id !== undefined ? player.id : null,
+        playerName: player && player.name !== undefined ? player.name : null,
+        playerPosition: player && player.position !== undefined ? player.position : null,
+        prevPlayerId: prevPlayer && prevPlayer.id !== undefined ? prevPlayer.id : null
       }
     );
   }
