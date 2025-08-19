@@ -65,6 +65,11 @@ const WelcomePopup: React.FC<WelcomePopupProps> = ({ isHost, onClose, onDontShow
       icon: <Timer className="w-5 h-5 text-orange-600" />,
       title: "Follow Draft Progress",
       description: "See current round, pick number, draft mode (auction/snake), and who's on the clock."
+    },
+    {
+      icon: <Settings className="w-5 h-5 text-red-600" />,
+      title: "Track Your Team",
+      description: "Go to Settings and select your team under 'My Team for Roster Display' to keep track of your roster in the right sidebar throughout the draft."
     }
   ];
 

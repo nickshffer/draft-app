@@ -123,7 +123,7 @@ export class DraftActionLogger {
       { selectedPlayer: player },
       {
         isHost: this.isHost,
-        playerId: player && player.id !== undefined ? player.id : null,
+        playerId: player && player.id !== undefined ? player.id : undefined,
         playerName: player && player.name !== undefined ? player.name : null,
         playerPosition: player && player.position !== undefined ? player.position : null,
         prevPlayerId: prevPlayer && prevPlayer.id !== undefined ? prevPlayer.id : null

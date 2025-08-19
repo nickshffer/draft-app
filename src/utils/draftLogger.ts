@@ -1,4 +1,4 @@
-import { ref, push, serverTimestamp, off } from 'firebase/database';
+import { ref, push, serverTimestamp } from 'firebase/database';
 import { database } from '../firebase/config';
 
 export interface DraftLogEntry {
@@ -42,7 +42,7 @@ class DraftLogger {
     action: string,
     prevState: Record<string, any>,
     newState: Record<string, any>,
-    metadata: DraftLogEntry['metadata'] = {}
+    metadata: DraftLogEntry['metadata']
   ): Promise<void> {
     if (!this.isEnabled || !roomId) {
       console.warn('Draft logging is disabled or roomId is missing');
@@ -88,7 +88,7 @@ class DraftLogger {
     roomId: string,
     action: string,
     description: string,
-    metadata: DraftLogEntry['metadata'] = {}
+    metadata: DraftLogEntry['metadata']
   ): Promise<void> {
     const changes = [{
       key: 'action_description',

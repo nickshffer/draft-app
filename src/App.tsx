@@ -25,6 +25,9 @@ import { createDraftActionLogger } from './utils/draftActionLogger';
 // Import welcome utilities
 import { shouldShowWelcome, dismissWelcome } from './utils/welcomePreferences';
 
+// Import team roster preferences
+import { getSelectedTeamId, setSelectedTeamId } from './utils/teamRosterPreferences';
+
 // Roster slot definitions
 interface RosterSlot {
   id: string;
@@ -40,10 +43,10 @@ const ROSTER_STRUCTURE: RosterSlot[] = [
   { id: 'wr3', position: 'WR', label: 'WR', eligiblePositions: ['WR'] },
   { id: 'rb1', position: 'RB', label: 'RB', eligiblePositions: ['RB'] },
   { id: 'rb2', position: 'RB', label: 'RB', eligiblePositions: ['RB'] },
-  { id: 'flex', position: 'FLEX', label: 'FLEX', eligiblePositions: ['WR', 'RB', 'TE'] },
   { id: 'te', position: 'TE', label: 'TE', eligiblePositions: ['TE'] },
+  { id: 'flex', position: 'FLEX', label: 'FLEX', eligiblePositions: ['WR', 'RB', 'TE'] },
   { id: 'k', position: 'K', label: 'K', eligiblePositions: ['K'] },
-  { id: 'def', position: 'DEF', label: 'DEF', eligiblePositions: ['DEF'] }
+  { id: 'def', position: 'DST', label: 'DEF', eligiblePositions: ['DST'] }
 ];
 
 interface AssignedRosterSlot extends RosterSlot {
@@ -99,31 +102,75 @@ const sortTeamsByBudgetWithTiebreaker = (teams: Team[]): Team[] => {
   });
 };
 
-// Function to assign players to roster slots
+// Function to assign players to roster slots with dynamic expansion for overflow
 const assignPlayersToRosterSlots = (players: Player[], rosterSize: number): AssignedRosterSlot[] => {
   const slots: AssignedRosterSlot[] = ROSTER_STRUCTURE.map(slot => ({
     ...slot,
     isEmpty: true
   }));
   
-  // Add bench slots
+  // Add bench slots based on roster size
   const benchSlotsNeeded = Math.max(0, rosterSize - ROSTER_STRUCTURE.length);
   for (let i = 0; i < benchSlotsNeeded; i++) {
     slots.push({
       id: `bench${i + 1}`,
       position: 'BEN',
       label: 'BEN',
-      eligiblePositions: ['QB', 'WR', 'RB', 'TE', 'K', 'DEF'], // Any position can be benched
+      eligiblePositions: ['QB', 'WR', 'RB', 'TE', 'K', 'DST'], // Any position can be benched
       isEmpty: true
     });
   }
 
+  let nextBenchNumber = benchSlotsNeeded + 1;
+
   // Assign players to slots in draft order
   for (const player of players) {
-    // Find the first available slot that can hold this player
-    const availableSlot = slots.find(slot => 
-      slot.isEmpty && slot.eligiblePositions.includes(player.position)
+    // Only process players with valid positions
+    const validPositions = ['QB', 'WR', 'RB', 'TE', 'K', 'DST'];
+    if (!validPositions.includes(player.position)) {
+      continue; // Skip invalid positions
+    }
+
+    // Find the best available slot that can hold this player
+    // Priority: position-specific slots first, then FLEX, then bench
+    let availableSlot = slots.find(slot => 
+      slot.isEmpty && 
+      slot.eligiblePositions.includes(player.position) &&
+      slot.position !== 'FLEX' && // Prioritize position-specific slots over FLEX
+      slot.position !== 'BEN'     // Prioritize starters over bench
     );
+    
+    // If no position-specific slot, try FLEX
+    if (!availableSlot) {
+      availableSlot = slots.find(slot => 
+        slot.isEmpty && 
+        slot.position === 'FLEX' &&
+        slot.eligiblePositions.includes(player.position)
+      );
+    }
+    
+    // If no FLEX slot, try bench
+    if (!availableSlot) {
+      availableSlot = slots.find(slot => 
+        slot.isEmpty && 
+        slot.position === 'BEN' &&
+        slot.eligiblePositions.includes(player.position)
+      );
+    }
+    
+    // If no slot available, create a new bench slot for this player
+    if (!availableSlot) {
+      const newBenchSlot: AssignedRosterSlot = {
+        id: `bench${nextBenchNumber}`,
+        position: 'BEN',
+        label: 'BEN',
+        eligiblePositions: ['QB', 'WR', 'RB', 'TE', 'K', 'DST'],
+        isEmpty: true
+      };
+      slots.push(newBenchSlot);
+      availableSlot = newBenchSlot;
+      nextBenchNumber++;
+    }
     
     if (availableSlot) {
       availableSlot.player = player;
@@ -295,6 +342,11 @@ export default function FantasyFootballDraft({
   const [expandedTeams, setExpandedTeams] = useState<Record<number, boolean>>({});
   const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
   const [editFormData, setEditFormData] = useState({ owner: "", name: "" });
+  
+  // Team roster display state
+  const [selectedTeamForRoster, setSelectedTeamForRoster] = useState<number | null>(() => {
+    return getSelectedTeamId();
+  });
   
   // Responsive UI state
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
@@ -803,6 +855,12 @@ export default function FantasyFootballDraft({
     }));
   };
 
+  // Handle team selection for right sidebar roster
+  const handleSelectedTeamChange = (teamId: number | null) => {
+    setSelectedTeamForRoster(teamId);
+    setSelectedTeamId(teamId);
+  };
+
   // Note: Teams should only expand/retract on user action, not automatically
 
   // Undo button is always visible when there are picks to undo (no auto-hide)
@@ -949,13 +1007,11 @@ export default function FantasyFootballDraft({
   // Timer controls (host only)
   const startTimer = async () => {
     if (!isHost) return;
-    await logger.logTimerAction('start');
     await updateFirebaseState({ isTimerRunning: true }, 'start_timer');
   };
 
   const pauseTimer = async () => {
     if (!isHost) return;
-    await logger.logTimerAction('pause');
     await updateFirebaseState({ isTimerRunning: false }, 'pause_timer');
   };
 
@@ -1486,6 +1542,32 @@ export default function FantasyFootballDraft({
                     min="10"
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
+                </div>
+              </div>
+              
+              {/* Personal Settings Section */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium border-b-2 border-black pb-2">Personal Settings</h3>
+                <div>
+                  <label className="block text-sm font-medium text-black mb-2">
+                    My Team for Roster Display
+                  </label>
+                  <div className="text-xs text-gray-600 mb-2">
+                    Select your team to persistently show your roster in the right sidebar. This helps you keep track of your own picks throughout the draft.
+                  </div>
+                  <select
+                    value={selectedTeamForRoster || ""}
+                    onChange={(e) => handleSelectedTeamChange(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-full px-3 py-2 bg-white border-2 border-black text-black"
+                    style={{ boxShadow: '2px 2px 0 #000' }}
+                  >
+                    <option value="">No team selected</option>
+                    {teams.map(team => (
+                      <option key={team.id} value={team.id}>
+                        {team.owner} - {team.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
               
@@ -2634,6 +2716,104 @@ export default function FantasyFootballDraft({
               </>
             )}
           </div>
+          
+          {/* Selected Team Roster */}
+          {selectedTeamForRoster && (() => {
+            const selectedTeam = teams.find(team => team.id === selectedTeamForRoster);
+            if (!selectedTeam) return null;
+            
+            return (
+              <div className="border-t-2 border-black">
+                <div className="flex justify-between items-center p-2 bg-[#1A202E] text-white border-b-2 border-black">
+                  <h3 className="font-normal text-lg flex items-center text-[18px] font-[Geist_Mono] mx-[10px] my-[0px]">
+                    <Users className="w-4 h-4 mr-2" />
+                    My Team
+                  </h3>
+                </div>
+                
+                <div className="p-2 border-b-2 border-black bg-white">
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="font-bold text-[#EF416E]" style={{fontFamily: dmMonoFont}}>
+                      {selectedTeam.owner}
+                    </div>
+                    <div className="text-xs text-[#04AEC5] border border-black p-0.5 px-[10px] py-[2px] font-bold">
+                      ${selectedTeam.budget}
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <div className="text-black font-normal text-[11px]">
+                      {selectedTeam.name}
+                    </div>
+                    <div className="text-black text-xs border border-black p-0.5 px-[7px] py-[2px]">
+                      P: {selectedTeam.players?.length || 0}
+                    </div>
+                  </div>
+                  {draftMode === "snake" && (
+                    <div className="text-xs text-black mt-1 border border-black p-0.5 inline-block">
+                      Snake: #{sortedTeamsByBudget.findIndex(t => t.id === selectedTeam.id) + 1}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="px-2 pb-2 bg-white">
+                  {(() => {
+                    const rosterSlots = assignPlayersToRosterSlots(selectedTeam.players || [], draftSettings.rosterSize);
+                    return (
+                      <div className="overflow-x-auto border border-gray-500 mt-2" style={{ backgroundColor: 'rgba(255,255,255,0.85)' }}>
+                        <table className="min-w-full border-collapse">
+                          <thead className="bg-gray-100 border-b border-gray-500">
+                            <tr>
+                              <th className="px-2 py-1 text-left text-[10px] font-bold text-black uppercase tracking-wider border-r border-gray-500 opacity-70">Slot</th>
+                              <th className="px-2 py-1 text-left text-[10px] font-bold text-black uppercase tracking-wider border-r border-gray-500 opacity-70">Player</th>
+                              <th className="px-2 py-1 text-left text-[10px] font-bold text-black uppercase tracking-wider opacity-70">
+                                {draftMode === "auction" ? "Price" : "Round"}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rosterSlots.map((slot, slotIdx) => {
+                              const draftDetails = slot.player ? getPlayerDraftDetails(slot.player.id, selectedTeam.id) : null;
+                              const isStartingSlot = slot.position !== 'BEN';
+                              return (
+                                <tr key={slot.id} className={`${slotIdx % 2 === 0 ? 'bg-white' : 'bg-[#E8F9FB]'} border-b border-gray-500 last:border-b-0`}>
+                                  <td className={`px-2 py-1 whitespace-nowrap text-[10px] border-r border-gray-500 text-center ${isStartingSlot ? 'bg-gray-50 font-bold' : ''}`}>
+                                    <span className={`px-1 py-0.5 rounded text-[9px] ${isStartingSlot ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
+                                      {slot.label}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-1 whitespace-nowrap text-[10px] text-black border-r border-gray-500">
+                                    {slot.player ? (
+                                      <div className="flex items-center space-x-1">
+                                        <span className="font-medium">{slot.player.name}</span>
+                                        <PositionBadge pos={slot.player.position} />
+                                      </div>
+                                    ) : (
+                                      <span className="text-gray-400 italic text-[9px]">Empty</span>
+                                    )}
+                                  </td>
+                                  <td className="px-2 py-1 whitespace-nowrap text-[10px] font-medium">
+                                    {draftDetails ? (
+                                      draftMode === "auction" ? (
+                                        <span className="text-[#EF416E]">${draftDetails.amount}</span>
+                                      ) : (
+                                        <span className="text-[#04AEC5]">R{draftDetails.round}</span>
+                                      )
+                                    ) : (
+                                      <span className="text-gray-400">-</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
