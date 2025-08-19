@@ -86,6 +86,25 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
           isTimerRunning: newTime > 0,
           lastActivity: serverTimestamp()
         });
+        
+        // Log timer updates (but don't log every single second - only significant changes)
+        if (newTime === 0 || newTime % 10 === 0) {
+          try {
+            const { draftLogger } = await import('../utils/draftLogger');
+            await draftLogger.logSimpleAction(
+              roomId,
+              'timer_update',
+              `Timer updated to ${newTime}s${newTime === 0 ? ' (expired)' : ''}`,
+              {
+                isHost: true,
+                timeRemaining: newTime,
+                expired: newTime === 0
+              }
+            );
+          } catch (logError) {
+            console.warn('Failed to log timer update:', logError);
+          }
+        }
 
         if (newTime === 0) {
           console.log('Timer expired');
@@ -189,7 +208,7 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
     highlightDirection: firebaseState.highlightDirection || 1,
     currentDraftTeam: firebaseState.currentDraftTeam || null,
     draftedPlayers: firebaseState.draftedPlayers || [],
-    customPlayerList: firebaseState.customPlayerList || null,
+    customPlayerList: firebaseState.customPlayerList,
     
     // Connection state
     isConnected,
