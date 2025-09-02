@@ -46,7 +46,7 @@ const ROSTER_STRUCTURE: RosterSlot[] = [
   { id: 'te', position: 'TE', label: 'TE', eligiblePositions: ['TE'] },
   { id: 'flex', position: 'FLEX', label: 'FLEX', eligiblePositions: ['WR', 'RB', 'TE'] },
   { id: 'k', position: 'K', label: 'K', eligiblePositions: ['K'] },
-  { id: 'def', position: 'DST', label: 'DEF', eligiblePositions: ['DST'] }
+  { id: 'def', position: 'DST', label: 'DST', eligiblePositions: ['DST'] }
 ];
 
 interface AssignedRosterSlot extends RosterSlot {
@@ -425,7 +425,23 @@ export default function FantasyFootballDraft({
   // Update players when custom player list changes from Firebase
   useEffect(() => {
     if (customPlayerList && customPlayerList.length > 0) {
-      setPlayers(customPlayerList);
+      const dstCount = customPlayerList.filter(p => p.position === 'DST').length;
+      
+      if (dstCount === 0) {
+        // Firebase customPlayerList is missing DST players - add them from sample.csv
+        const samplePlayers = parseCsvToPlayers(sampleCsvData);
+        const sampleDSTPlayers = samplePlayers.filter(p => p.position === 'DST');
+        
+        // Combine Firebase list with DST players from sample
+        const combinedPlayers = [...customPlayerList, ...sampleDSTPlayers];
+        setPlayers(combinedPlayers);
+      } else {
+        setPlayers(customPlayerList);
+      }
+    } else {
+      // Fallback to sample CSV data if no custom player list
+      const fallbackPlayers = parseCsvToPlayers(sampleCsvData);
+      setPlayers(fallbackPlayers);
     }
   }, [customPlayerList]);
 

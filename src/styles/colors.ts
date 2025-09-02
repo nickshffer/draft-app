@@ -24,5 +24,5 @@ export const positionBadgeColors: PositionBadgeColors = {
   WR: { bg: "#118AB2", text: "#FFFFFF" }, // Blue
   TE: { bg: "#9D4EDD", text: "#FFFFFF" }, // Purple
   K: { bg: "#FF70A6", text: "#000000" },  // Pink
-  DEF: { bg: "#9CA3AF", text: "#000000" }, // Gray
+  DST: { bg: "#9CA3AF", text: "#000000" }, // Gray
 };

@@ -112,7 +112,7 @@ export function useCsvUpload() {
             let position = getValue('position').toUpperCase();
             
             // Map common position variants
-            if (['D', 'DST', 'D/ST'].includes(position)) position = 'DEF';
+            if (['D', 'DEF', 'D/ST'].includes(position)) position = 'DST';
             if (['PK'].includes(position)) position = 'K';
             
             // Skip if position is invalid

@@ -1,45 +1,12 @@
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import '@testing-library/jest-dom'
 import App from '../src/App'
-import { playerData } from '../src/data/mockData'
 import { Player } from '../src/types'
 
-// Mock Firebase
-vi.mock('../src/hooks/useFirebaseDraft', () => ({
-  useFirebaseDraft: () => ({
-    teams: [],
-    draftHistory: [],
-    draftSettings: {
-      auctionBudget: 200,
-      rosterSize: 16,
-      auctionRounds: 5,
-      teamCount: 10,
-      draftTimer: 90
-    },
-    leagueName: 'Test League',
-    currentRound: 1,
-    currentPick: 1,
-    draftMode: 'auction' as const,
-    snakeDraftOrder: [],
-    timeRemaining: 90,
-    isTimerRunning: false,
-    selectedPlayer: null,
-    currentBid: 1,
-    currentBidTeam: null,
-    highlightedTeamIndex: 0,
-    highlightDirection: 1,
-    currentDraftTeam: null,
-    draftedPlayers: [],
-    isConnected: true,
-    error: null,
-    updateFirebaseState: vi.fn(),
-    createRoom: vi.fn(),
-    updateCustomPlayerList: vi.fn(),
-    customPlayerList: null
-  })
-}))
+// NO MOCKS - Using real Firebase and real data
 
 // Helper function to create a CSV file
 const createCSVFile = (content: string, filename: string = 'test.csv') => {
@@ -53,7 +20,9 @@ const getFileInput = () => screen.getByLabelText(/import player rankings/i)
 
 describe('CSV Upload Functionality', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    // Clear any existing state
+    localStorage.clear()
+    sessionStorage.clear()
   })
 
   describe('Valid CSV Upload', () => {
@@ -311,6 +280,51 @@ describe('CSV Upload Functionality', () => {
         expect(errorMessage).toBeInTheDocument()
         expect(screen.queryByText(/invalid position/i)).not.toBeInTheDocument()
       })
+    })
+
+    it('should successfully match real DST players from sample.csv', async () => {
+      const user = userEvent.setup()
+      render(<App isHost={false} />)
+
+      const settingsButton = screen.getByRole('button', { name: /settings/i })
+      await user.click(settingsButton)
+
+      // Use actual DST players from sample.csv
+      const realDSTCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
+169,DST,Texans D/ST,HOU,6,5,100.0
+170,DST,Steelers D/ST,PIT,5,4,95.0`
+
+      const file = createCSVFile(realDSTCSV)
+      const fileInput = getFileInput()
+
+      await user.upload(fileInput, file)
+
+      // Should successfully match these DST players
+      await waitFor(() => {
+        expect(screen.getByText(/successfully matched 2 players/i)).toBeInTheDocument()
+      }, { timeout: 3000 })
+    })
+
+    it('should handle DST team matching correctly', async () => {
+      const user = userEvent.setup()
+      render(<App isHost={false} />)
+
+      const settingsButton = screen.getByRole('button', { name: /settings/i })
+      await user.click(settingsButton)
+
+      // Test DST matching by team (DST players are matched by team, not name)
+      const dstTeamCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
+169,DST,Houston Defense,HOU,6,5,100.0`
+
+      const file = createCSVFile(dstTeamCSV)
+      const fileInput = getFileInput()
+
+      await user.upload(fileInput, file)
+
+      // Should match based on team (HOU) even though name is different
+      await waitFor(() => {
+        expect(screen.getByText(/successfully matched 1 player/i)).toBeInTheDocument()
+      }, { timeout: 3000 })
     })
 
     it('should normalize kicker positions correctly', async () => {

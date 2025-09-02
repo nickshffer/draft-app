@@ -67,7 +67,7 @@ const parseCSVContent = (csvText: string, existingPlayers: Player[]) => {
     }
     
     let position = getValue('position').toUpperCase()
-    if (['D', 'DST', 'D/ST'].includes(position)) position = 'DEF'
+    if (['D', 'DEF', 'D/ST'].includes(position)) position = 'DST'
     if (['PK'].includes(position)) position = 'K'
     
     const csvPlayer = {
@@ -152,14 +152,59 @@ describe('CSV Parser Logic', () => {
 
       const mockPlayersWithDef = [
         ...mockPlayers,
-        { id: 5, rank: 50, position: "DEF", name: "Test Defense", team: "SF", bye: 9, projectedValue: 5, projectedPoints: 100.0 }
+        { id: 5, rank: 50, position: "DST", name: "Test Defense", team: "SF", bye: 9, projectedValue: 5, projectedPoints: 100.0 }
       ]
 
       const result = parseCSVContent(csvContent, mockPlayersWithDef)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(1)
-      expect(result.matches[0].player.position).toBe("DEF")
+      expect(result.matches[0].player.position).toBe("DST")
+    })
+
+    it('should parse DST players from sample.csv format', () => {
+      const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
+169,DST,Texans D/ST,HOU,6,0,0
+170,DST,Steelers D/ST,PIT,5,0,0`
+
+      const mockPlayersWithDST = [
+        ...mockPlayers,
+        { id: 169, rank: 169, position: "DST", name: "Texans D/ST", team: "HOU", bye: 6, projectedValue: 0, projectedPoints: 0 },
+        { id: 170, rank: 170, position: "DST", name: "Steelers D/ST", team: "PIT", bye: 5, projectedValue: 0, projectedPoints: 0 }
+      ]
+
+      const result = parseCSVContent(csvContent, mockPlayersWithDST)
+      
+      expect(result.errors).toHaveLength(0)
+      expect(result.matches).toHaveLength(2)
+      expect(result.matches[0].player.position).toBe("DST")
+      expect(result.matches[0].player.name).toBe("Texans D/ST")
+      expect(result.matches[1].player.position).toBe("DST")
+      expect(result.matches[1].player.name).toBe("Steelers D/ST")
+    })
+
+    it('should normalize all defense position formats to DST', () => {
+      const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
+1,D,Defense 1,SF,9,5,100.0
+2,DEF,Defense 2,LAC,5,4,95.0
+3,D/ST,Defense 3,LAR,7,3,90.0
+4,DST,Defense 4,KC,10,2,85.0`
+
+      const mockPlayersWithAllDST = [
+        ...mockPlayers,
+        { id: 1, rank: 1, position: "DST", name: "Defense 1", team: "SF", bye: 9, projectedValue: 5, projectedPoints: 100.0 },
+        { id: 2, rank: 2, position: "DST", name: "Defense 2", team: "LAC", bye: 5, projectedValue: 4, projectedPoints: 95.0 },
+        { id: 3, rank: 3, position: "DST", name: "Defense 3", team: "LAR", bye: 7, projectedValue: 3, projectedPoints: 90.0 },
+        { id: 4, rank: 4, position: "DST", name: "Defense 4", team: "KC", bye: 10, projectedValue: 2, projectedPoints: 85.0 }
+      ]
+
+      const result = parseCSVContent(csvContent, mockPlayersWithAllDST)
+      
+      expect(result.errors).toHaveLength(0)
+      expect(result.matches).toHaveLength(4)
+      result.matches.forEach(match => {
+        expect(match.player.position).toBe("DST")
+      })
     })
   })
 
