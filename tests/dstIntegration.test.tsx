@@ -1,49 +1,20 @@
 import React from 'react'
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom'
 import App from '../src/App'
 
-// Mock Firebase
-vi.mock('../src/hooks/useFirebaseDraft', () => ({
-  useFirebaseDraft: () => ({
-    teams: [],
-    draftHistory: [],
-    draftSettings: {
-      auctionBudget: 200,
-      rosterSize: 16,
-      auctionRounds: 5,
-      teamCount: 10,
-      draftTimer: 90
-    },
-    leagueName: 'Test League',
-    currentRound: 1,
-    currentPick: 1,
-    draftMode: 'auction' as const,
-    snakeDraftOrder: [],
-    timeRemaining: 90,
-    isTimerRunning: false,
-    selectedPlayer: null,
-    currentBid: 1,
-    currentBidTeam: null,
-    highlightedTeamIndex: 0,
-    highlightDirection: 1,
-    currentDraftTeam: null,
-    draftedPlayers: [],
-    isConnected: true,
-    error: null,
-    updateFirebaseState: vi.fn(),
-    createRoom: vi.fn(),
-    updateCustomPlayerList: vi.fn(),
-    customPlayerList: null
-  })
-}))
+// NO MOCKS - Using real Firebase and real data
 
 describe('DST Integration Tests', () => {
   it('should load and display DST players in the available players list', async () => {
     render(<App isHost={false} />)
     
     // Wait for the app to load
-    await screen.findByText('Test League')
+    await waitFor(() => {
+      const leagueElement = screen.queryByText('Yo Soy FIESTA') || screen.queryByText(/league/i)
+      expect(leagueElement).toBeInTheDocument()
+    }, { timeout: 10000 })
     
     // Look for DST players in the table - check for some known DST teams
     // The DST players should be visible in the player table
@@ -72,7 +43,10 @@ describe('DST Integration Tests', () => {
     render(<App isHost={false} />)
     
     // Wait for the app to load
-    await screen.findByText('Test League')
+    await waitFor(() => {
+      const leagueElement = screen.queryByText('Yo Soy FIESTA') || screen.queryByText(/league/i)
+      expect(leagueElement).toBeInTheDocument()
+    }, { timeout: 10000 })
     
     // Look for position filter dropdown or DST position indicators
     const dstElements = screen.getAllByText('DST')
@@ -83,7 +57,10 @@ describe('DST Integration Tests', () => {
     render(<App isHost={false} />)
     
     // Wait for the app to load
-    await screen.findByText('Test League')
+    await waitFor(() => {
+      const leagueElement = screen.queryByText('Yo Soy FIESTA') || screen.queryByText(/league/i)
+      expect(leagueElement).toBeInTheDocument()
+    }, { timeout: 10000 })
     
     // Check that DST players have team information
     // Look for known DST entries from sample.csv
@@ -102,7 +79,10 @@ describe('DST Integration Tests', () => {
     render(<App isHost={false} />)
     
     // Wait for the app to load
-    await screen.findByText('Test League')
+    await waitFor(() => {
+      const leagueElement = screen.queryByText('Yo Soy FIESTA') || screen.queryByText(/league/i)
+      expect(leagueElement).toBeInTheDocument()
+    }, { timeout: 10000 })
     
     // Look for DST roster slot - it should be labeled as "DST" not "DEF"
     try {

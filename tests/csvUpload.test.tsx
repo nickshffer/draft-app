@@ -15,6 +15,61 @@ const createCSVFile = (content: string, filename: string = 'test.csv') => {
   return file
 }
 
+// Helper function to wait for app to load and open settings
+const openSettings = async (user: any) => {
+  // Wait for app to load
+  await waitFor(() => {
+    const leagueElement = screen.queryByText('Yo Soy FIESTA') || screen.queryByText(/draft room/i)
+    expect(leagueElement).toBeInTheDocument()
+  }, { timeout: 15000 })
+
+  // Wait a bit more for UI to stabilize
+  await new Promise(resolve => setTimeout(resolve, 2000))
+
+  // Find settings button by looking for the pink button with settings icon
+  const buttons = screen.getAllByRole('button')
+  let settingsButton = null
+  
+  // Look for the settings button by the pink background color
+  for (const button of buttons) {
+    const style = window.getComputedStyle(button)
+    const className = button.className
+    
+    // Check for the pink color used for settings button
+    if (className.includes('bg-[#EF416E]') || className.includes('EF416E')) {
+      settingsButton = button
+      break
+    }
+  }
+  
+  if (!settingsButton) {
+    // Fallback: look for any button that might be settings by position or content
+    settingsButton = buttons.find(btn => {
+      const svg = btn.querySelector('svg')
+      return svg && btn.className.includes('bg-') && btn.className.includes('border')
+    })
+  }
+  
+  if (!settingsButton) {
+    console.log('Available buttons:', buttons.map(btn => ({ 
+      className: btn.className, 
+      innerHTML: btn.innerHTML.substring(0, 100) 
+    })))
+    throw new Error('Settings button not found')
+  }
+  
+  await user.click(settingsButton)
+  
+  // Wait for settings modal to open - be more flexible with the text
+  await waitFor(() => {
+    const settingsText = screen.queryByText(/settings/i) || 
+                        screen.queryByText(/draft settings/i) ||
+                        screen.queryByText(/player data/i) ||
+                        screen.queryByText(/import player rankings/i)
+    expect(settingsText).toBeInTheDocument()
+  }, { timeout: 8000 })
+}
+
 // Helper function to get file input
 const getFileInput = () => screen.getByLabelText(/import player rankings/i)
 
@@ -31,8 +86,7 @@ describe('CSV Upload Functionality', () => {
       render(<App isHost={false} />)
 
       // Open settings modal
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       // Create valid CSV content with players that exist in mockData
       const validCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
@@ -48,16 +102,15 @@ describe('CSV Upload Functionality', () => {
       // Wait for processing
       await waitFor(() => {
         expect(screen.getByText(/successfully matched \d+ players/i)).toBeInTheDocument()
-      }, { timeout: 3000 })
-    })
+      }, { timeout: 10000 })
+    }, 20000) // Increased timeout for real Firebase tests
 
     it('should display local values in parentheses after successful upload', async () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
       // Open settings modal
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const validCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,Ja'Marr Chase,CIN,10,60,350.0`
@@ -83,7 +136,7 @@ describe('CSV Upload Functionality', () => {
         const valueElements = screen.getAllByText(/\$\d+/)
         expect(valueElements.length).toBeGreaterThan(0)
       })
-    })
+    }, 20000) // Increased timeout for real Firebase tests
   })
 
   describe('Invalid CSV Upload', () => {
@@ -91,8 +144,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const invalidCSV = `RANK,POSITION,PLAYER,TEAM
 1,RB,Christian McCaffrey,SF
@@ -106,14 +158,13 @@ describe('CSV Upload Functionality', () => {
       await waitFor(() => {
         expect(screen.getByText(/missing required columns/i)).toBeInTheDocument()
       })
-    })
+    }, 20000) // Increased timeout for real Firebase tests
 
     it('should show error for non-CSV file', async () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const txtFile = new File(['test content'], 'test.txt', { type: 'text/plain' })
       const fileInput = getFileInput()
@@ -129,8 +180,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const invalidCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,RB,Fake Player,ZZZ,9,65,285.5
@@ -152,8 +202,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       // Use "AJ Brown" instead of "A.J. Brown" to test fuzzy matching
       const fuzzyCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
@@ -174,8 +223,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const fuzzyCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,AJ Brown,PHI,9,45,260.0
@@ -199,8 +247,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const emptyCSV = ''
       const file = createCSVFile(emptyCSV)
@@ -217,8 +264,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const headersOnlyCSV = 'RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS'
       const file = createCSVFile(headersOnlyCSV)
@@ -235,8 +281,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const malformedCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,Ja'Marr Chase,CIN,10,invalid_number,350.0`
@@ -258,8 +303,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       // Test different defense position formats
       const defenseCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
@@ -286,8 +330,7 @@ describe('CSV Upload Functionality', () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       // Use actual DST players from sample.csv
       const realDSTCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
@@ -302,15 +345,14 @@ describe('CSV Upload Functionality', () => {
       // Should successfully match these DST players
       await waitFor(() => {
         expect(screen.getByText(/successfully matched 2 players/i)).toBeInTheDocument()
-      }, { timeout: 3000 })
+      }, { timeout: 10000 })
     })
 
     it('should handle DST team matching correctly', async () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       // Test DST matching by team (DST players are matched by team, not name)
       const dstTeamCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
@@ -324,15 +366,14 @@ describe('CSV Upload Functionality', () => {
       // Should match based on team (HOU) even though name is different
       await waitFor(() => {
         expect(screen.getByText(/successfully matched 1 player/i)).toBeInTheDocument()
-      }, { timeout: 3000 })
+      }, { timeout: 10000 })
     })
 
     it('should normalize kicker positions correctly', async () => {
       const user = userEvent.setup()
       render(<App isHost={false} />)
 
-      const settingsButton = screen.getByRole('button', { name: /settings/i })
-      await user.click(settingsButton)
+      await openSettings(user)
 
       const kickerCSV = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,PK,Test Kicker,SF,9,2,80.0`
@@ -348,7 +389,7 @@ describe('CSV Upload Functionality', () => {
         expect(errorMessage).toBeInTheDocument()
         expect(screen.queryByText(/invalid position/i)).not.toBeInTheDocument()
       })
-    })
+    }, 20000) // Increased timeout for real Firebase tests
   })
 })
 

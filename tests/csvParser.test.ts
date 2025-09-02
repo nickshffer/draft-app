@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import Fuse from 'fuse.js'
 import { Player } from '../src/types'
-import { playerData } from '../src/data/mockData'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+
+const sampleCsvData = readFileSync(join(__dirname, '../src/data/sample.csv'), 'utf-8')
 
 // Mock CSV parsing logic extracted for testing
 const parseCSVContent = (csvText: string, existingPlayers: Player[]) => {
@@ -113,13 +116,41 @@ const parseCSVContent = (csvText: string, existingPlayers: Player[]) => {
   return { errors, matches }
 }
 
+// Parse real players from sample.csv for testing
+const parseRealPlayers = (): Player[] => {
+  const lines = sampleCsvData.split('\n').filter(line => line.trim())
+  const players: Player[] = []
+  
+  for (let i = 1; i < lines.length && i <= 50; i++) { // Use first 50 players for testing
+    const line = lines[i].trim()
+    if (!line) continue
+    
+    const values = line.split(',').map(v => v.trim())
+    if (values.length < 7) continue
+    
+    let position = values[1].toUpperCase()
+    if (['D', 'DEF', 'D/ST'].includes(position)) position = 'DST'
+    if (['PK'].includes(position)) position = 'K'
+    
+    const player: Player = {
+      id: i,
+      rank: parseInt(values[0]) || i,
+      position: position,
+      name: values[2],
+      team: values[3],
+      bye: parseInt(values[4]) || 0,
+      projectedValue: parseFloat(values[5]) || 0,
+      projectedPoints: parseFloat(values[6]) || 0
+    }
+    
+    players.push(player)
+  }
+  
+  return players
+}
+
 describe('CSV Parser Logic', () => {
-  const mockPlayers: Player[] = [
-    { id: 1, rank: 1, position: "WR", name: "Ja'Marr Chase", team: "CIN", bye: 10, projectedValue: 57, projectedPoints: 351.75 },
-    { id: 2, rank: 2, position: "RB", name: "Bijan Robinson", team: "ATL", bye: 5, projectedValue: 56, projectedPoints: 317.44 },
-    { id: 3, rank: 15, position: "WR", name: "A.J. Brown", team: "PHI", bye: 9, projectedValue: 42, projectedPoints: 255.62 },
-    { id: 4, rank: 7, position: "RB", name: "Christian McCaffrey", team: "SF", bye: 14, projectedValue: 53, projectedPoints: 293.75 }
-  ]
+  const realPlayers = parseRealPlayers()
 
   describe('Valid CSV Parsing', () => {
     it('should parse valid CSV with exact matches', () => {
@@ -127,7 +158,7 @@ describe('CSV Parser Logic', () => {
 1,WR,Ja'Marr Chase,CIN,10,60,350.0
 2,RB,Bijan Robinson,ATL,5,58,320.0`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(2)
@@ -140,7 +171,7 @@ describe('CSV Parser Logic', () => {
       const csvContent = `rank,pos,player name,team,bye week,auction $,proj pts
 1,WR,Ja'Marr Chase,CIN,10,60,350.0`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(1)
@@ -150,12 +181,12 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,D,Test Defense,SF,9,5,100.0`
 
-      const mockPlayersWithDef = [
-        ...mockPlayers,
-        { id: 5, rank: 50, position: "DST", name: "Test Defense", team: "SF", bye: 9, projectedValue: 5, projectedPoints: 100.0 }
+      const playersWithDST = [
+        ...realPlayers,
+        { id: 500, rank: 500, position: "DST", name: "Test Defense", team: "SF", bye: 9, projectedValue: 5, projectedPoints: 100.0 }
       ]
 
-      const result = parseCSVContent(csvContent, mockPlayersWithDef)
+      const result = parseCSVContent(csvContent, playersWithDST)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(1)
@@ -167,13 +198,13 @@ describe('CSV Parser Logic', () => {
 169,DST,Texans D/ST,HOU,6,0,0
 170,DST,Steelers D/ST,PIT,5,0,0`
 
-      const mockPlayersWithDST = [
-        ...mockPlayers,
+      const playersWithRealDST = [
+        ...realPlayers,
         { id: 169, rank: 169, position: "DST", name: "Texans D/ST", team: "HOU", bye: 6, projectedValue: 0, projectedPoints: 0 },
         { id: 170, rank: 170, position: "DST", name: "Steelers D/ST", team: "PIT", bye: 5, projectedValue: 0, projectedPoints: 0 }
       ]
 
-      const result = parseCSVContent(csvContent, mockPlayersWithDST)
+      const result = parseCSVContent(csvContent, playersWithRealDST)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(2)
@@ -190,15 +221,15 @@ describe('CSV Parser Logic', () => {
 3,D/ST,Defense 3,LAR,7,3,90.0
 4,DST,Defense 4,KC,10,2,85.0`
 
-      const mockPlayersWithAllDST = [
-        ...mockPlayers,
-        { id: 1, rank: 1, position: "DST", name: "Defense 1", team: "SF", bye: 9, projectedValue: 5, projectedPoints: 100.0 },
-        { id: 2, rank: 2, position: "DST", name: "Defense 2", team: "LAC", bye: 5, projectedValue: 4, projectedPoints: 95.0 },
-        { id: 3, rank: 3, position: "DST", name: "Defense 3", team: "LAR", bye: 7, projectedValue: 3, projectedPoints: 90.0 },
-        { id: 4, rank: 4, position: "DST", name: "Defense 4", team: "KC", bye: 10, projectedValue: 2, projectedPoints: 85.0 }
+      const playersWithAllDST = [
+        ...realPlayers,
+        { id: 501, rank: 501, position: "DST", name: "Defense 1", team: "SF", bye: 9, projectedValue: 5, projectedPoints: 100.0 },
+        { id: 502, rank: 502, position: "DST", name: "Defense 2", team: "LAC", bye: 5, projectedValue: 4, projectedPoints: 95.0 },
+        { id: 503, rank: 503, position: "DST", name: "Defense 3", team: "LAR", bye: 7, projectedValue: 3, projectedPoints: 90.0 },
+        { id: 504, rank: 504, position: "DST", name: "Defense 4", team: "KC", bye: 10, projectedValue: 2, projectedPoints: 85.0 }
       ]
 
-      const result = parseCSVContent(csvContent, mockPlayersWithAllDST)
+      const result = parseCSVContent(csvContent, playersWithAllDST)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(4)
@@ -213,26 +244,26 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM
 1,WR,Ja'Marr Chase,CIN`
 
-      expect(() => parseCSVContent(csvContent, mockPlayers)).toThrow('Missing required columns')
+      expect(() => parseCSVContent(csvContent, realPlayers)).toThrow('Missing required columns')
     })
 
     it('should throw error for empty CSV', () => {
       const csvContent = ''
 
-      expect(() => parseCSVContent(csvContent, mockPlayers)).toThrow('CSV must have header row and data')
+      expect(() => parseCSVContent(csvContent, realPlayers)).toThrow('CSV must have header row and data')
     })
 
     it('should throw error for headers only', () => {
       const csvContent = 'RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS'
 
-      expect(() => parseCSVContent(csvContent, mockPlayers)).toThrow('CSV must have header row and data')
+      expect(() => parseCSVContent(csvContent, realPlayers)).toThrow('CSV must have header row and data')
     })
 
     it('should return errors for non-matching players', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,RB,Fake Player,ZZZ,9,65,285.5`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(1)
       expect(result.errors[0]).toContain('not found in host data')
@@ -245,7 +276,7 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,AJ Brown,PHI,9,45,260.0`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(1)
       // The fuzzy matching might not be close enough, so let's just check for error
@@ -259,7 +290,7 @@ describe('CSV Parser Logic', () => {
 1,WR,AJ Brown,PHI,9,45,260.0
 2,RB,Christian McCafrey,SF,14,53,293.0`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(2)
       expect(result.errors[0]).toContain('AJ Brown')
@@ -272,7 +303,7 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,Jamarr Chase,CIN,10,60,350.0`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(1)
       expect(result.errors[0]).toContain('Jamarr Chase')
@@ -287,7 +318,7 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,RB,Completely Different Name,XYZ,9,65,285.5`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(1)
       expect(result.errors[0]).toContain('not found in host data')
@@ -301,7 +332,7 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,Ja'Marr Chase,CIN,10,invalid,not_a_number`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(1)
@@ -313,7 +344,7 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,Ja'Marr Chase,CIN,10,60.5,350.75`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(1)
@@ -327,7 +358,7 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,ja'marr chase,cin,10,60,350.0`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(1)
@@ -338,7 +369,7 @@ describe('CSV Parser Logic', () => {
       const csvContent = `RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS
 1,WR,Ja'Marr Chase,cin,10,60,350.0`
 
-      const result = parseCSVContent(csvContent, mockPlayers)
+      const result = parseCSVContent(csvContent, realPlayers)
       
       expect(result.errors).toHaveLength(0)
       expect(result.matches).toHaveLength(1)
