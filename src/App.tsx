@@ -1252,6 +1252,32 @@ export default function FantasyFootballDraft({
     setShowSettings(false);
   };
 
+  // Export current player data as CSV
+  const downloadPlayerDataAsCsv = () => {
+    const currentPlayers = customPlayerList || players;
+    
+    // Create CSV header
+    const csvHeader = 'RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS\n';
+    
+    // Create CSV rows
+    const csvRows = currentPlayers.map(player => {
+      return `${player.rank},${player.position},"${player.name}",${player.team},${player.bye},${player.projectedValue},${player.projectedPoints}`;
+    }).join('\n');
+    
+    const csvContent = csvHeader + csvRows;
+    
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `player-data-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Filter and sort players
   const filteredPlayers = players
     .filter(player => !draftedPlayers.includes(player.id))
@@ -1665,14 +1691,20 @@ export default function FantasyFootballDraft({
                     </div>
                   )}
 
-                  <div className="mt-4 text-xs text-gray-600">
-                    <p className="font-medium mb-1">CSV Format Example:</p>
-                    <pre className="bg-white border-2 border-black p-2 overflow-x-auto text-[10px] sm:text-xs">
-                      RANK,POSITION,PLAYER,TEAM,BYE,AUC $,PROJ. PTS<br/>
-                      1,WR,Ja'Marr Chase,CIN,10,57,351.75<br/>
-                      2,RB,Bijan Robinson,ATL,5,56,317.44<br/>
-                      3,WR,Justin Jefferson,MIN,6,55,311.52
-                    </pre>
+                  <div className="mt-4">
+                    <button
+                      onClick={downloadPlayerDataAsCsv}
+                      className="flex items-center justify-center px-4 py-2 border-2 border-black bg-[#04AEC5] text-white text-sm font-bold"
+                      style={{ boxShadow: '2px 2px 0 #000' }}
+                    >
+                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Download Current Player Data
+                    </button>
+                    <div className="text-xs text-gray-600 mt-2">
+                      Downloads the current player data as CSV format
+                    </div>
                   </div>
                 </div>
               </div>
