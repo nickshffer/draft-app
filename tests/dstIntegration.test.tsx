@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import App from '../src/App'
 
@@ -8,7 +8,9 @@ import App from '../src/App'
 
 describe('DST Integration Tests', () => {
   it('should load and display DST players in the available players list', async () => {
-    render(<App isHost={false} />)
+    await act(async () => {
+      render(<App isHost={false} />)
+    })
     
     // Wait for the app to load
     await waitFor(() => {

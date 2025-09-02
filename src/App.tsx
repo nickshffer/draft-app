@@ -348,6 +348,9 @@ export default function FantasyFootballDraft({
     return getSelectedTeamId();
   });
   
+  // Track if we've already checked for welcome popup to prevent repeated shows
+  const [hasCheckedWelcome, setHasCheckedWelcome] = useState(false);
+  
   // Responsive UI state
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
@@ -372,9 +375,9 @@ export default function FantasyFootballDraft({
     return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
 
-  // Initialize Firebase room if host and no existing data
+  // Initialize Firebase room if host and Firebase state is incomplete
   useEffect(() => {
-    if (isHost && teams.length === 0 && isConnected) {
+    if (isHost && isConnected && (!draftSettings || !teams || teams.length === 0)) {
       // Parse sample CSV data for initial player list
       const initialPlayers = parseCsvToPlayers(sampleCsvData);
       
@@ -391,6 +394,7 @@ export default function FantasyFootballDraft({
           rosterSize: initialRosterSize,
           auctionRounds: initialAuctionRounds,
           draftTimer: draftTimerSeconds,
+          auctionTimer: 10,
           teamCount: mockTeams.length
         },
         leagueName: "Yo Soy FIESTA",
@@ -398,7 +402,7 @@ export default function FantasyFootballDraft({
         currentPick: 1,
         draftMode: "auction" as DraftMode,
         snakeDraftOrder: [],
-        timeRemaining: draftTimerSeconds,
+        timeRemaining: 10, // Start with auction timer
         isTimerRunning: false,
         selectedPlayer: null,
         currentBid: 1,
@@ -541,12 +545,15 @@ export default function FantasyFootballDraft({
 
 
 
-  // Show welcome popup on first visit (after connection is established)
+  // Show welcome popup on first visit (after connection is established) - only once
   useEffect(() => {
-    if (isConnected && shouldShowWelcome(isHost)) {
-      setShowWelcomePopup(true);
+    if (isConnected && !hasCheckedWelcome) {
+      setHasCheckedWelcome(true);
+      if (shouldShowWelcome(isHost)) {
+        setShowWelcomePopup(true);
+      }
     }
-  }, [isConnected, isHost]);
+  }, [isConnected, isHost, hasCheckedWelcome]);
 
   // Update the highlighted team when auction is complete (Host only)
   const updateHighlightedTeam = async () => {
@@ -1003,7 +1010,7 @@ export default function FantasyFootballDraft({
       currentBid: 1,
       currentBidTeam: null,
       isTimerRunning: false,
-      timeRemaining: draftSettings.draftTimer,
+      timeRemaining: draftSettings.auctionTimer,
       draftMode: "auction" as const,
       snakeDraftOrder: [],
       currentDraftTeam: null,
@@ -1106,7 +1113,7 @@ export default function FantasyFootballDraft({
       selectedPlayer: null,
       currentBid: 1,
       currentBidTeam: null,
-      timeRemaining: draftSettings.draftTimer,
+      timeRemaining: draftMode === "auction" ? draftSettings.auctionTimer : draftSettings.draftTimer,
       isTimerRunning: draftMode === "snake", // Auto-start timer in snake mode
       lastDraftAction: newLastAction
     }, 'draft_pick', {
@@ -1147,7 +1154,7 @@ export default function FantasyFootballDraft({
       selectedPlayer: player,
       currentBid: 1,
       currentBidTeam: null,
-      timeRemaining: draftSettings.draftTimer,
+      timeRemaining: draftSettings.auctionTimer,
       isTimerRunning: true
     }, 'select_player', {
       playerId: player.id,
@@ -1173,10 +1180,14 @@ export default function FantasyFootballDraft({
     
     await logger.logBidPlaced(teamId, bidAmount, selectedPlayer);
     
+    const timerValue = draftMode === "auction" ? draftSettings.auctionTimer : draftSettings.draftTimer;
+    console.log(`Bid placed - resetting timer to ${timerValue}s (mode: ${draftMode})`);
+    
     await updateFirebaseState({
       currentBid: bidAmount,
       currentBidTeam: teamId,
-      timeRemaining: draftSettings.draftTimer
+      timeRemaining: timerValue,
+      isTimerRunning: true
     }, 'place_bid', {
       teamId,
       teamName: team.name,
@@ -1323,6 +1334,16 @@ export default function FantasyFootballDraft({
 
   // Suppress unused variable warnings by referencing them
   void showBidInterface; void getPlayersByPosition; void setRoomId; void snakeDraftOrder; void error; void createRoom;
+
+  // Show loading state if Firebase isn't ready
+  if (!isConnected) {
+    return (
+      <div className="flex flex-col h-full bg-[#F0F2F5] text-gray-800 font-sans border border-black items-center justify-center" style={{boxShadow:'8px 8px 0 #000'}}>
+        <div className="text-2xl font-bold mb-4">Loading Draft Room...</div>
+        {error && <div className="text-red-500">{error}</div>}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-[#F0F2F5] text-gray-800 font-sans border border-black" style={{boxShadow:'8px 8px 0 #000'}}>
@@ -1547,7 +1568,7 @@ export default function FantasyFootballDraft({
                 
                 <div>
                   <label className="block text-sm font-medium text-black mb-1">
-                    Draft Timer (seconds)
+                    Snake Draft Timer (seconds)
                   </label>
                   <input 
                     type="number" 
@@ -1556,6 +1577,21 @@ export default function FantasyFootballDraft({
                     disabled={!isHost}
                     className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
                     min="10"
+                    style={{ boxShadow: '2px 2px 0 #000' }}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-black mb-1">
+                    Auction Timer (seconds)
+                  </label>
+                  <input 
+                    type="number" 
+                    value={draftSettings.auctionTimer}
+                    onChange={(e) => updateDraftSetting('auctionTimer', parseInt(e.target.value))}
+                    disabled={!isHost}
+                    className={`w-full px-3 py-2 bg-white border-2 border-black text-black ${!isHost ? 'opacity-50' : ''}`}
+                    min="5"
                     style={{ boxShadow: '2px 2px 0 #000' }}
                   />
                 </div>

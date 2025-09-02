@@ -32,27 +32,27 @@ interface FirebaseDraftState {
 export function useFirebaseDraftWithLogging(roomId: string, isHost: boolean = false) {
   const originalHook = useFirebaseDraft(roomId, isHost);
   
-  // Get current state for logging
+  // Get current state for logging - NO FALLBACKS
   const getCurrentState = useCallback((): Partial<FirebaseDraftState> => {
     return {
-      teams: originalHook.teams || [],
-      draftHistory: originalHook.draftHistory || [],
-      draftSettings: originalHook.draftSettings || {} as DraftSettings,
-      leagueName: originalHook.leagueName || '',
-      currentRound: originalHook.currentRound || 1,
-      currentPick: originalHook.currentPick || 1,
-      draftMode: originalHook.draftMode || 'auction',
-      snakeDraftOrder: originalHook.snakeDraftOrder || [],
-      timeRemaining: originalHook.timeRemaining || 0,
-      isTimerRunning: originalHook.isTimerRunning || false,
-      selectedPlayer: originalHook.selectedPlayer || null,
-      currentBid: originalHook.currentBid || 1,
-      currentBidTeam: originalHook.currentBidTeam || null,
-      lastDraftAction: originalHook.lastDraftAction || null,
-      highlightedTeamIndex: originalHook.highlightedTeamIndex || 0,
-      highlightDirection: originalHook.highlightDirection || 1,
-      currentDraftTeam: originalHook.currentDraftTeam || null,
-      draftedPlayers: originalHook.draftedPlayers || [],
+      teams: originalHook.teams,
+      draftHistory: originalHook.draftHistory,
+      draftSettings: originalHook.draftSettings,
+      leagueName: originalHook.leagueName,
+      currentRound: originalHook.currentRound,
+      currentPick: originalHook.currentPick,
+      draftMode: originalHook.draftMode,
+      snakeDraftOrder: originalHook.snakeDraftOrder,
+      timeRemaining: originalHook.timeRemaining,
+      isTimerRunning: originalHook.isTimerRunning,
+      selectedPlayer: originalHook.selectedPlayer,
+      currentBid: originalHook.currentBid,
+      currentBidTeam: originalHook.currentBidTeam,
+      lastDraftAction: originalHook.lastDraftAction,
+      highlightedTeamIndex: originalHook.highlightedTeamIndex,
+      highlightDirection: originalHook.highlightDirection,
+      currentDraftTeam: originalHook.currentDraftTeam,
+      draftedPlayers: originalHook.draftedPlayers,
       customPlayerList: originalHook.customPlayerList
     };
   }, [originalHook]);

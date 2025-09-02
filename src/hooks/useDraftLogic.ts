@@ -16,7 +16,7 @@ export function useDraftLogic(
   const [currentPick, setCurrentPick] = useState(1);
   const [draftMode, setDraftMode] = useState<DraftMode>("auction");
   const [snakeDraftOrder, setSnakeDraftOrder] = useState<number[]>([]);
-  const [timeRemaining, setTimeRemaining] = useState(draftSettings.draftTimer);
+  const [timeRemaining, setTimeRemaining] = useState(draftSettings.auctionTimer);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -28,7 +28,7 @@ export function useDraftLogic(
           if (prev <= 1) {
             clearInterval(timerRef.current as NodeJS.Timeout);
             setIsTimerRunning(false);
-            return draftSettings.draftTimer;
+            return 0;
           }
           return prev - 1;
         });
@@ -42,7 +42,7 @@ export function useDraftLogic(
         clearInterval(timerRef.current);
       }
     };
-  }, [isTimerRunning, draftSettings.draftTimer]);
+  }, [isTimerRunning]);
 
   // Switch from auction to snake draft when auction rounds are completed
   useEffect(() => {
@@ -127,7 +127,7 @@ export function useDraftLogic(
     setCurrentPick(prev => prev + 1);
 
     // Reset timer
-    setTimeRemaining(draftSettings.draftTimer);
+    setTimeRemaining(draftMode === "auction" ? draftSettings.auctionTimer : draftSettings.draftTimer);
     setIsTimerRunning(false);
   };
 

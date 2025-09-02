@@ -51,6 +51,7 @@ export interface DraftSettings {
   rosterSize: number;
   auctionRounds: number;
   draftTimer: number;
+  auctionTimer: number;
   teamCount: number;
 }
 

@@ -67,9 +67,9 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
     return () => unsubscribe();
   }, [roomId, isHost]);
 
-  // Host-only timer management
+  // Host-only timer management - SIMPLE VERSION
   useEffect(() => {
-    if (!isHost || !firebaseState.isTimerRunning || !roomId) {
+    if (!isHost || !roomId) {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -77,46 +77,38 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
       return;
     }
 
-    timerRef.current = setInterval(async () => {
-      const newTime = Math.max(0, (firebaseState.timeRemaining || 0) - 1);
-      
-      try {
-        await update(ref(database, `draftRooms/${roomId}`), {
-          timeRemaining: newTime,
-          isTimerRunning: newTime > 0,
-          lastActivity: serverTimestamp()
-        });
+    // Only run timer if it's supposed to be running AND time > 0
+    if (firebaseState.isTimerRunning && (firebaseState.timeRemaining || 0) > 0) {
+      timerRef.current = setInterval(async () => {
+        const currentTime = firebaseState.timeRemaining || 0;
+        const newTime = Math.max(0, currentTime - 1);
         
-        // Log timer updates (but don't log every single second - only significant changes)
-        if (newTime === 0 || newTime % 10 === 0) {
-          try {
-            const { draftLogger } = await import('../utils/draftLogger');
-            await draftLogger.logSimpleAction(
-              roomId,
-              'timer_update',
-              `Timer updated to ${newTime}s${newTime === 0 ? ' (expired)' : ''}`,
-              {
-                isHost: true,
-                timeRemaining: newTime,
-                expired: newTime === 0
-              }
-            );
-          } catch (logError) {
-            console.warn('Failed to log timer update:', logError);
+        try {
+          await update(ref(database, `draftRooms/${roomId}`), {
+            timeRemaining: newTime,
+            isTimerRunning: newTime > 0, // Stop timer when it hits 0
+            lastActivity: serverTimestamp()
+          });
+          
+          if (newTime === 0) {
+            console.log('Timer expired - stopped at 0');
           }
+        } catch (err) {
+          console.error('Timer update failed:', err);
         }
-
-        if (newTime === 0) {
-          console.log('Timer expired');
-        }
-      } catch (err) {
-        console.error('Timer update failed:', err);
+      }, 1000);
+    } else {
+      // Clear timer if not running or at 0
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
-    }, 1000);
+    }
 
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
   }, [isHost, firebaseState.isTimerRunning, firebaseState.timeRemaining, roomId]);
@@ -178,40 +170,40 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
     }
   };
 
-  // Return state with fallbacks
+  // Return state - Firebase is source of truth, but provide safe defaults for incomplete state
+  const isFirebaseReady = firebaseState.teams && firebaseState.draftSettings;
+  
   return {
-    // Firebase state with defaults
-    teams: (firebaseState.teams || []).map(team => ({
-      ...team,
-      players: team.players || []
-    })),
+    // Firebase state - use actual values or safe defaults (but mark as not connected if incomplete)
+    teams: firebaseState.teams || [],
     draftHistory: firebaseState.draftHistory || [],
     draftSettings: firebaseState.draftSettings || {
       auctionBudget: 200,
       rosterSize: 16,
       auctionRounds: 5,
       draftTimer: 90,
+      auctionTimer: 10,
       teamCount: 10
     },
     leagueName: firebaseState.leagueName || "Draft Room",
-    currentRound: firebaseState.currentRound || 1,
-    currentPick: firebaseState.currentPick || 1,
+    currentRound: firebaseState.currentRound ?? 1,
+    currentPick: firebaseState.currentPick ?? 1,
     draftMode: firebaseState.draftMode || "auction",
     snakeDraftOrder: firebaseState.snakeDraftOrder || [],
-    timeRemaining: firebaseState.timeRemaining || 90,
-    isTimerRunning: firebaseState.isTimerRunning || false,
-    selectedPlayer: firebaseState.selectedPlayer || null,
-    currentBid: firebaseState.currentBid || 1,
-    currentBidTeam: firebaseState.currentBidTeam || null,
-    lastDraftAction: firebaseState.lastDraftAction || null,
-    highlightedTeamIndex: firebaseState.highlightedTeamIndex || 0,
-    highlightDirection: firebaseState.highlightDirection || 1,
-    currentDraftTeam: firebaseState.currentDraftTeam || null,
+    timeRemaining: firebaseState.timeRemaining ?? 10,
+    isTimerRunning: firebaseState.isTimerRunning ?? false,
+    selectedPlayer: firebaseState.selectedPlayer ?? null,
+    currentBid: firebaseState.currentBid ?? 1,
+    currentBidTeam: firebaseState.currentBidTeam ?? null,
+    lastDraftAction: firebaseState.lastDraftAction ?? null,
+    highlightedTeamIndex: firebaseState.highlightedTeamIndex ?? 0,
+    highlightDirection: firebaseState.highlightDirection ?? 1,
+    currentDraftTeam: firebaseState.currentDraftTeam ?? null,
     draftedPlayers: firebaseState.draftedPlayers || [],
     customPlayerList: firebaseState.customPlayerList,
     
-    // Connection state
-    isConnected,
+    // Connection state - only connected if Firebase is ready
+    isConnected: isConnected && isFirebaseReady,
     error,
     
     // Actions
