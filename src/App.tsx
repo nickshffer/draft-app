@@ -28,6 +28,9 @@ import { shouldShowWelcome, dismissWelcome } from './utils/welcomePreferences';
 // Import team roster preferences
 import { getSelectedTeamId, setSelectedTeamId } from './utils/teamRosterPreferences';
 
+// Import localStorage logger
+import { localStorageLogger } from './utils/localStorageLogger';
+
 // Roster slot definitions
 interface RosterSlot {
   id: string;
@@ -1128,6 +1131,36 @@ export default function FantasyFootballDraft({
       draftMode
     });
 
+    // Log completed pick to localStorage (comprehensive record)
+    localStorageLogger.logAction(
+      roomId,
+      'draft_pick_completed',
+      {
+        // Player info
+        playerId,
+        playerName: player.name,
+        playerPosition: player.position,
+        playerTeam: player.team,
+        playerRank: player.rank,
+        playerProjectedPoints: player.projectedPoints,
+        
+        // Draft info
+        draftingTeamId: teamId,
+        draftingTeamName: draftTeam?.name,
+        draftingTeamOwner: draftTeam?.owner,
+        amount: draftMode === "auction" ? amount : 0,
+        draftMode,
+        draftRound: currentRound,
+        draftPick: currentPick,
+        
+        // Context
+        totalPicks: draftHistory.length + 1,
+        remainingBudget: draftMode === "auction" ? (draftTeam?.budget || 0) - amount : null,
+        timestamp: new Date().toISOString()
+      },
+      isHost
+    );
+
     setShowBidInterface(false);
     
     // Update highlighted team after auction complete
@@ -1145,8 +1178,6 @@ export default function FantasyFootballDraft({
   // Handle player selection for bidding
   const handlePlayerSelect = async (player: Player) => {
     if (!isHost) return;
-    
-
     
     await logger.logPlayerSelection(player, selectedPlayer);
     

@@ -1,5 +1,6 @@
 import { ref, push, serverTimestamp } from 'firebase/database';
 import { database } from '../firebase/config';
+import { localStorageLogger } from './localStorageLogger';
 
 export interface DraftLogEntry {
   timestamp: any; // Firebase ServerValue.TIMESTAMP
@@ -71,6 +72,20 @@ class DraftLogger {
         metadata: JSON.parse(JSON.stringify(sanitizedMetadata))
       };
 
+      // Log to localStorage only for draft picks (fallback)
+      if (action === 'draft_pick') {
+        localStorageLogger.logAction(
+          roomId,
+          action,
+          {
+            changes: changes.length,
+            keys: changes.map(c => c.key).slice(0, 5), // First 5 changed keys
+            metadata: sanitizedMetadata
+          },
+          sanitizedMetadata?.isHost || false
+        );
+      }
+
       // Add to queue for processing
       this.logQueue.push(logEntry);
       this.processQueue();
@@ -108,6 +123,19 @@ class DraftLogger {
       // Deep clone the sanitized metadata to prevent mutations
       metadata: JSON.parse(JSON.stringify(sanitizedMetadata))
     };
+
+    // Log to localStorage only for draft-related simple actions (fallback)
+    if (action.includes('draft') || action.includes('pick')) {
+      localStorageLogger.logAction(
+        roomId,
+        action,
+        {
+          description,
+          metadata: sanitizedMetadata
+        },
+        sanitizedMetadata?.isHost || false
+      );
+    }
 
     this.logQueue.push(logEntry);
     this.processQueue();
@@ -151,6 +179,13 @@ class DraftLogger {
       
       if (isPermissionDenied) {
         console.warn('Draft logging disabled due to Firebase permission restrictions. This is expected in demo mode.');
+        // Log the permission error to localStorage
+        localStorageLogger.logError(
+          logEntry.roomId,
+          'Firebase permission denied - logging disabled',
+          'writeLogEntry',
+          logEntry.metadata?.isHost || false
+        );
         // Disable logging to prevent spam
         this.setEnabled(false);
         // Clear the queue to prevent further attempts
@@ -174,6 +209,13 @@ class DraftLogger {
         
       } else {
         console.error(`Failed to log entry after ${this.maxRetries} retries:`, logEntry);
+        // Log the final failure to localStorage
+        localStorageLogger.logError(
+          logEntry.roomId,
+          `Firebase logging failed after ${this.maxRetries} retries: ${errorMessage}`,
+          'writeLogEntry_final_failure',
+          logEntry.metadata?.isHost || false
+        );
         delete this.retryAttempts[entryId];
       }
     }
