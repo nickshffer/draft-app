@@ -2130,7 +2130,7 @@ export default function FantasyFootballDraft({
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredPlayers.slice(0, 50).map((player, idx) => (
+                      {filteredPlayers.map((player, idx) => (
                         <tr key={player.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-[#E8F9FB]'} hover:bg-[#FFE5F0] border-b border-black`}>
                           <td className="px-2 sm:px-3 py-1 sm:py-2 text-center text-xs text-black border-r border-black">
                             {player.rank}

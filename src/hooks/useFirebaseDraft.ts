@@ -175,7 +175,10 @@ export function useFirebaseDraft(roomId: string, isHost: boolean = false) {
   
   return {
     // Firebase state - use actual values or safe defaults (but mark as not connected if incomplete)
-    teams: firebaseState.teams || [],
+    teams: (firebaseState.teams || []).map(team => ({
+      ...team,
+      players: team.players || []
+    })),
     draftHistory: firebaseState.draftHistory || [],
     draftSettings: firebaseState.draftSettings || {
       auctionBudget: 200,
