@@ -1327,6 +1327,17 @@ export default function FantasyFootballDraft({
   // Sort teams by remaining budget (for snake draft order) with random tiebreaker
   const sortedTeamsByBudget = sortTeamsByBudgetWithTiebreaker(teams);
 
+  // Get teams in draft order - auction uses original order, snake uses snake draft order
+  const teamsInDraftOrder = (() => {
+    if (draftMode === "snake" && snakeDraftOrder.length > 0) {
+      // Use snake draft order
+      return snakeDraftOrder.map(teamId => teams.find(team => team.id === teamId)).filter(Boolean) as Team[];
+    } else {
+      // Use original team order (by team ID)
+      return [...teams].sort((a, b) => a.id - b.id);
+    }
+  })();
+
   // Group roster players by position - Used in Team Rosters tab
   const getPlayersByPosition = (teamPlayers: Player[] = []) => {
     const positionGroups: Record<string, Player[]> = {};
@@ -1691,7 +1702,7 @@ export default function FantasyFootballDraft({
                     </div>
                   )}
 
-                  <div className="mt-4">
+                  <div className="mt-4 flex flex-col items-center">
                     <button
                       onClick={downloadPlayerDataAsCsv}
                       className="flex items-center justify-center px-4 py-2 border-2 border-black bg-[#04AEC5] text-white text-sm font-bold"
@@ -1700,9 +1711,9 @@ export default function FantasyFootballDraft({
                       <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      Download Current Player Data
+                      Download Default Data
                     </button>
-                    <div className="text-xs text-gray-600 mt-2">
+                    <div className="text-xs text-gray-600 mt-2 text-center">
                       Downloads the current player data as CSV format
                     </div>
                   </div>
@@ -1956,11 +1967,11 @@ export default function FantasyFootballDraft({
           </div>
           
           <div className="divide-y-2 divide-black">
-            {teams.map((team, index) => (
+            {teamsInDraftOrder.map((team) => (
               <div 
                 key={team.id} 
                 className={`${
-                  (draftMode === "auction" && index === highlightedTeamIndex) 
+                  (draftMode === "auction" && teams.findIndex(t => t.id === team.id) === highlightedTeamIndex) 
                     ? 'bg-[#FCF188]' 
                     : (draftMode === "snake" && currentDraftTeam === team.id)
                       ? 'bg-[#FCF188]'
@@ -1996,7 +2007,7 @@ export default function FantasyFootballDraft({
                 
                 {/* Team Roster */}
                 {expandedTeams[team.id] && (
-                  <div className={`px-2 pb-2 border-b-2 border-black ${((draftMode === "auction" && index === highlightedTeamIndex) || (draftMode === "snake" && currentDraftTeam === team.id)) ? 'bg-[#FCF188]' : 'bg-white'}`}>
+                  <div className={`px-2 pb-2 border-b-2 border-black ${((draftMode === "auction" && teams.findIndex(t => t.id === team.id) === highlightedTeamIndex) || (draftMode === "snake" && currentDraftTeam === team.id)) ? 'bg-[#FCF188]' : 'bg-white'}`}>
                     {(() => {
                       const rosterSlots = assignPlayersToRosterSlots(team.players || [], draftSettings.rosterSize);
                       return (
