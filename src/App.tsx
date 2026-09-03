@@ -343,6 +343,7 @@ export default function FantasyFootballDraft({
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [showBidInterface, setShowBidInterface] = useState(false);
   const [expandedTeams, setExpandedTeams] = useState<Record<number, boolean>>({});
+  const [collapsedPositions, setCollapsedPositions] = useState<Record<string, boolean>>({});
   const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
   const [editFormData, setEditFormData] = useState({ owner: "", name: "" });
   
@@ -826,6 +827,18 @@ export default function FantasyFootballDraft({
   // Toggle expanded state for a team
   const toggleTeamExpand = (teamId: number) => {
     setExpandedTeams(prev => ({ ...prev, [teamId]: !prev[teamId] }));
+  };
+
+  // Toggle expanded state for a position group in the By Position tab
+  const togglePositionExpand = (position: string) => {
+    setCollapsedPositions(prev => ({ ...prev, [position]: !prev[position] }));
+  };
+
+  // Collapse or expand every position group at once
+  const setAllPositionsCollapsed = (collapsed: boolean) => {
+    setCollapsedPositions(
+      Object.fromEntries(Object.keys(positionCategories).map(position => [position, collapsed]))
+    );
   };
 
   // Start editing a team's info
@@ -1354,6 +1367,10 @@ export default function FantasyFootballDraft({
     acc[position] = filteredPlayers.filter(player => player.position === position);
     return acc;
   }, {} as Record<string, Player[]>);
+
+  // A search or position filter is narrowing the list - used to keep matching
+  // groups open in the By Position tab so results can't hide inside a collapsed one
+  const isFilteringPositions = searchQuery.trim() !== "" || positionFilter !== "ALL";
 
   // Sort teams by remaining budget (for snake draft order) with random tiebreaker
   const sortedTeamsByBudget = sortTeamsByBudgetWithTiebreaker(teams);
@@ -2268,13 +2285,58 @@ export default function FantasyFootballDraft({
 
             {activeTab === "positions" && (
               <div className="space-y-4 p-2">
-                {Object.keys(positionCategories).map(position => (
+                {!isFilteringPositions && (
+                <div className="flex justify-end space-x-2">
+                  <button
+                    onClick={() => setAllPositionsCollapsed(false)}
+                    className="bg-white border-2 border-black px-3 py-1 text-xs font-medium text-black hover:bg-gray-100"
+                    style={{ boxShadow: '2px 2px 0 #000' }}
+                  >
+                    Expand All
+                  </button>
+                  <button
+                    onClick={() => setAllPositionsCollapsed(true)}
+                    className="bg-white border-2 border-black px-3 py-1 text-xs font-medium text-black hover:bg-gray-100"
+                    style={{ boxShadow: '2px 2px 0 #000' }}
+                  >
+                    Collapse All
+                  </button>
+                </div>
+                )}
+                {Object.keys(positionCategories).map(position => {
+                  const positionPlayers = playersByPosition[position];
+                  // While filtering, groups holding matches stay open regardless of
+                  // collapse state; clearing the filter restores what the user collapsed
+                  const isPositionExpanded = isFilteringPositions
+                    ? positionPlayers.length > 0
+                    : !collapsedPositions[position];
+                  return (
                   <div key={position} className="border-2 border-black">
-                    <div className="bg-gray-200 px-4 sm:px-6 py-2 sm:py-3 border-b-2 border-black flex items-center justify-between">
-                      <h3 className="text-base sm:text-lg font-bold text-[rgba(1,119,134,1)] font-[Geist_Mono] text-[16px] underline">{positionCategories[position]}</h3>
-                      <PositionBadge pos={position} />
-                    </div>
-                    {playersByPosition[position] && playersByPosition[position].length > 0 ? (
+                    <h3 className="m-0">
+                      <button
+                        type="button"
+                        id={`position-header-${position}`}
+                        onClick={() => togglePositionExpand(position)}
+                        aria-expanded={isPositionExpanded}
+                        aria-controls={`position-panel-${position}`}
+                        className={`w-full bg-gray-200 hover:bg-gray-300 px-4 sm:px-6 py-2 sm:py-3 flex items-center justify-between text-left ${isPositionExpanded ? 'border-b-2 border-black' : ''}`}
+                      >
+                        <span className="flex items-center">
+                          <span className="mr-[15px] border border-black p-0.5 text-black bg-[#FCF188]">
+                            {isPositionExpanded ?
+                              <ChevronDown className="w-3 h-3" /> :
+                              <ChevronRight className="w-3 h-3" />
+                            }
+                          </span>
+                          <span className="text-base sm:text-lg font-bold text-[rgba(1,119,134,1)] font-[Geist_Mono] text-[16px] underline">{positionCategories[position]}</span>
+                          <span className="ml-[10px] text-xs text-black border border-black px-[7px] py-[2px]">{positionPlayers.length}</span>
+                        </span>
+                        <PositionBadge pos={position} />
+                      </button>
+                    </h3>
+                    {isPositionExpanded && (
+                    <div id={`position-panel-${position}`} role="region" aria-labelledby={`position-header-${position}`}>
+                    {positionPlayers.length > 0 ? (
                       <div className="overflow-x-auto">
                         <table className="min-w-full border-collapse">
                           <thead className="bg-gray-100 border-b border-black">
@@ -2308,7 +2370,7 @@ export default function FantasyFootballDraft({
                             </tr>
                           </thead>
                           <tbody>
-                            {playersByPosition[position].map((player, idx) => (
+                            {positionPlayers.map((player, idx) => (
                               <tr key={player.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-[#E8F9FB]'} border-b border-black last:border-b-0`}>
                                 <td className="px-3 sm:px-6 py-1 sm:py-2 whitespace-nowrap text-[11px] sm:text-xs text-black border-r border-black" style={equalColumnStyle}>
                                   {player.rank}
@@ -2367,12 +2429,15 @@ export default function FantasyFootballDraft({
                         </table>
                       </div>
                     ) : (
-                      <div className="p-4 sm:p-6 text-center text-black border-t border-black">
+                      <div className="p-4 sm:p-6 text-center text-black">
                         No available players in this position
                       </div>
                     )}
+                    </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
