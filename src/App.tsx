@@ -837,10 +837,7 @@ export default function FantasyFootballDraft({
   // Collapse or expand every position group at once
   const setAllPositionsCollapsed = (collapsed: boolean) => {
     setCollapsedPositions(
-      Object.keys(positionCategories).reduce((acc, position) => {
-        acc[position] = collapsed;
-        return acc;
-      }, {} as Record<string, boolean>)
+      Object.fromEntries(Object.keys(positionCategories).map(position => [position, collapsed]))
     );
   };
 
@@ -1370,6 +1367,10 @@ export default function FantasyFootballDraft({
     acc[position] = filteredPlayers.filter(player => player.position === position);
     return acc;
   }, {} as Record<string, Player[]>);
+
+  // A search or position filter is narrowing the list - used to keep matching
+  // groups open in the By Position tab so results can't hide inside a collapsed one
+  const isFilteringPositions = searchQuery.trim() !== "" || positionFilter !== "ALL";
 
   // Sort teams by remaining budget (for snake draft order) with random tiebreaker
   const sortedTeamsByBudget = sortTeamsByBudgetWithTiebreaker(teams);
@@ -2284,6 +2285,7 @@ export default function FantasyFootballDraft({
 
             {activeTab === "positions" && (
               <div className="space-y-4 p-2">
+                {!isFilteringPositions && (
                 <div className="flex justify-end space-x-2">
                   <button
                     onClick={() => setAllPositionsCollapsed(false)}
@@ -2300,30 +2302,41 @@ export default function FantasyFootballDraft({
                     Collapse All
                   </button>
                 </div>
+                )}
                 {Object.keys(positionCategories).map(position => {
-                  const positionPlayers = playersByPosition[position] || [];
-                  const isPositionExpanded = !collapsedPositions[position];
+                  const positionPlayers = playersByPosition[position];
+                  // While filtering, groups holding matches stay open regardless of
+                  // collapse state; clearing the filter restores what the user collapsed
+                  const isPositionExpanded = isFilteringPositions
+                    ? positionPlayers.length > 0
+                    : !collapsedPositions[position];
                   return (
                   <div key={position} className="border-2 border-black">
-                    <button
-                      type="button"
-                      onClick={() => togglePositionExpand(position)}
-                      aria-expanded={isPositionExpanded}
-                      className={`w-full bg-gray-200 hover:bg-gray-300 px-4 sm:px-6 py-2 sm:py-3 flex items-center justify-between text-left ${isPositionExpanded ? 'border-b-2 border-black' : ''}`}
-                    >
-                      <div className="flex items-center">
-                        <span className="mr-[15px] border border-black p-0.5 text-black bg-[#FCF188]">
-                          {isPositionExpanded ?
-                            <ChevronDown className="w-3 h-3" /> :
-                            <ChevronRight className="w-3 h-3" />
-                          }
+                    <h3 className="m-0">
+                      <button
+                        type="button"
+                        id={`position-header-${position}`}
+                        onClick={() => togglePositionExpand(position)}
+                        aria-expanded={isPositionExpanded}
+                        aria-controls={`position-panel-${position}`}
+                        className={`w-full bg-gray-200 hover:bg-gray-300 px-4 sm:px-6 py-2 sm:py-3 flex items-center justify-between text-left ${isPositionExpanded ? 'border-b-2 border-black' : ''}`}
+                      >
+                        <span className="flex items-center">
+                          <span className="mr-[15px] border border-black p-0.5 text-black bg-[#FCF188]">
+                            {isPositionExpanded ?
+                              <ChevronDown className="w-3 h-3" /> :
+                              <ChevronRight className="w-3 h-3" />
+                            }
+                          </span>
+                          <span className="text-base sm:text-lg font-bold text-[rgba(1,119,134,1)] font-[Geist_Mono] text-[16px] underline">{positionCategories[position]}</span>
+                          <span className="ml-[10px] text-xs text-black border border-black px-[7px] py-[2px]">{positionPlayers.length}</span>
                         </span>
-                        <h3 className="text-base sm:text-lg font-bold text-[rgba(1,119,134,1)] font-[Geist_Mono] text-[16px] underline">{positionCategories[position]}</h3>
-                        <span className="ml-[10px] text-xs text-black border border-black px-[7px] py-[2px]">{positionPlayers.length}</span>
-                      </div>
-                      <PositionBadge pos={position} />
-                    </button>
-                    {isPositionExpanded && (positionPlayers.length > 0 ? (
+                        <PositionBadge pos={position} />
+                      </button>
+                    </h3>
+                    {isPositionExpanded && (
+                    <div id={`position-panel-${position}`} role="region" aria-labelledby={`position-header-${position}`}>
+                    {positionPlayers.length > 0 ? (
                       <div className="overflow-x-auto">
                         <table className="min-w-full border-collapse">
                           <thead className="bg-gray-100 border-b border-black">
@@ -2419,7 +2432,9 @@ export default function FantasyFootballDraft({
                       <div className="p-4 sm:p-6 text-center text-black">
                         No available players in this position
                       </div>
-                    ))}
+                    )}
+                    </div>
+                    )}
                   </div>
                   );
                 })}
